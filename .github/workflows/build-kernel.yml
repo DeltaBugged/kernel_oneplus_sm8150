@@ -119,3 +119,51 @@ jobs:
           path: hotdogb-kernelsu-susfs-${{ github.sha }}.tar.gz
           if-no-files-found: error
           retention-days: 14
+      - name: Build AnyKernel3 flashable ZIP
+        run: |
+          set -euo pipefail
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
+          cp out/arch/arm64/boot/Image.gz-dtb anykernel/Image.gz-dtb
+          cat > anykernel/anykernel.sh <<'EOF'
+          ### AnyKernel3 Ramdisk Mod Script
+          ## osm0sis @ xda-developers
+
+          properties() { '
+          kernel.string=DeltaBugged KernelSU-SUSFS for OnePlus 7T
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=hotdogb
+          device.name2=OnePlus7T
+          device.name3=OnePlus 7T
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; }
+
+          BLOCK=auto;
+          IS_SLOT_DEVICE=auto;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+
+          . tools/ak3-core.sh;
+
+          dump_boot;
+          write_boot;
+          EOF
+          (
+            cd anykernel
+            zip -r9 "$GITHUB_WORKSPACE/dist/hotdogb-kernelsu-susfs-${GITHUB_SHA}.zip" . -x '.git/*' 'README.md' '*placeholder'
+          )
+          unzip -l "dist/hotdogb-kernelsu-susfs-${GITHUB_SHA}.zip"
+          test -s "dist/hotdogb-kernelsu-susfs-${GITHUB_SHA}.zip"
+
+      - name: Upload flashable AnyKernel3 ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: hotdogb-kernelsu-susfs-flashable-${{ github.sha }}
+          path: dist/hotdogb-kernelsu-susfs-${{ github.sha }}.zip
+          if-no-files-found: error
+          retention-days: 14
