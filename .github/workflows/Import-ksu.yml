@@ -51,5 +51,37 @@ jobs:
             git push origin "HEAD:${BRANCH_NAME}"
           fi
 
+          python3 - <<'PY'
+          from pathlib import Path
+
+          kconfig = Path("drivers/Kconfig")
+          text = kconfig.read_text()
+          entry = 'source "drivers/kernelsu/Kconfig"'
+          if entry not in text:
+              marker = "endmenu"
+              if marker not in text:
+                  raise SystemExit("drivers/Kconfig: endmenu not found")
+              text = text.replace(marker, entry + "\\n\\n" + marker, 1)
+              kconfig.write_text(text)
+
+          makefile = Path("drivers/Makefile")
+          text = makefile.read_text()
+          entry = "obj-$(CONFIG_KSU) += kernelsu/"
+          if entry not in text:
+              makefile.write_text(text.rstrip() + "\\n" + entry + "\\n")
+
+          config = Path("arch/arm64/configs/vendor/sm8150-perf_defconfig")
+          text = config.read_text()
+          entry = "CONFIG_KSU=y"
+          if entry not in text:
+              marker = "CONFIG_MODULES=y"
+              if marker not in text:
+                  raise SystemExit("sm8150-perf_defconfig: CONFIG_MODULES=y not found")
+              text = text.replace(marker, marker + "\\n" + entry, 1)
+              config.write_text(text)
+          PY
+
+          git add drivers/kernelsu drivers/Kconfig drivers/Makefile arch/arm64/configs/vendor/sm8150-perf_defconfig
+
           echo "===== grep -rn ksu_handle_sys_reboot drivers/kernelsu ====="
           grep -rn --exclude-dir=.git 'ksu_handle_sys_reboot' drivers/kernelsu || true
