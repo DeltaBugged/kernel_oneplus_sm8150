@@ -1,0 +1,33 @@
+name: Check SUSFS 4.14 patch compatibility
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-susfs-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out working branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
+
+      - name: Download pinned SUSFS 4.14 backport
+        run: |
+          set -euo pipefail
+          curl -fL \
+            https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/26f2313be61f7a8603a50b2dcd12171495a79d27/Patches/Patch/susfs_patch_to_4.14.patch \
+            -o /tmp/susfs-4.14.patch
+          sha256sum /tmp/susfs-4.14.patch
+
+      - name: Check patch applicability without modifying the checkout
+        run: |
+          set -euo pipefail
+          git apply --check --verbose /tmp/susfs-4.14.patch
+
+      - name: Report result
+        run: echo "SUSFS 4.14 patch applies cleanly to this branch. No source files were changed."
