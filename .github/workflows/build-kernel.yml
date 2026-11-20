@@ -52,6 +52,9 @@ jobs:
           done
           ! grep -qx "CONFIG_KSU_KPROBES_HOOK=y" out/.config || { echo "KSU must use manual hooks on this 4.14 kernel"; exit 1; }
           grep -qx "# CONFIG_KSU_SUSFS_TRY_UMOUNT is not set" out/.config || { echo "Unported SUSFS try_umount must remain disabled"; exit 1; }
+          for option in CONFIG_OPLUS_DEVICE_IFNO CONFIG_OPLUS_FINGERPRINT CONFIG_TOUCHPANEL_OPLUS CONFIG_OPLUS_SM8150R_CHARGER; do
+            grep -qx "$option=y" out/.config || { echo "Missing or disabled provider config: $option"; grep -E '^(CONFIG_(OPLUS|TOUCHPANEL)|# CONFIG_(OPLUS|TOUCHPANEL))' out/.config || true; exit 1; }
+          done
 
       - name: Compile Image.gz-dtb
         run: |
