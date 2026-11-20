@@ -13,7 +13,6 @@
 /dts-v1/;
 /plugin/;
 
-/ {};
 
 #include <dt-bindings/clock/qcom,gcc-sm8150.h>
 #include <dt-bindings/clock/qcom,camcc-sm8150.h>
