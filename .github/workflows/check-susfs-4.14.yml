@@ -1,6 +1,11 @@
 name: Check SUSFS 4.14 patch compatibility
 
 on:
+  push:
+    branches:
+      - ksu-susfs
+    paths:
+      - '.github/workflows/check-susfs-4.14.yml'
   workflow_dispatch:
 
 permissions:
