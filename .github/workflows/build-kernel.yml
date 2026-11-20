@@ -65,6 +65,25 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             Image.gz-dtb
 
+      - name: Diagnose failed device-tree overlay
+        if: failure()
+        run: |
+          set +e
+          echo "=== DTC version ==="
+          out/scripts/dtc/dtc -v
+          echo "=== Overlay-related generated files ==="
+          find out/arch/arm64/boot/dts/18821 -maxdepth 1 -type f \\
+            \( -iname '*mtp-overlay*' -o -iname '*.cmd' \) -print
+          echo "=== Preprocessed overlay around PMIC fragment ==="
+          find out/arch/arm64/boot/dts/18821 -maxdepth 1 -type f \\
+            \( -name '*mtp-overlay*.tmp' -o -name '.*mtp-overlay*.tmp' \) \\
+            -print -exec sh -c 'grep -n -B 8 -A 12 "spmi_bus" "$1" | head -80' _ {} \\
+            \;
+          echo "=== Recorded DTC command ==="
+          find out/arch/arm64/boot/dts/18821 -maxdepth 1 -type f -name '.*mtp-overlay*.cmd' \\
+            -print -exec cat {} \\
+            \;
+
       - name: Verify kernel image
         run: |
           set -euo pipefail
