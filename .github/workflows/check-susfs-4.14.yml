@@ -6,14 +6,10 @@ on:
       - ksu-susfs
     paths:
       - '.github/workflows/check-susfs-4.14.yml'
-      - 'fs/namei.c'
-      - 'fs/proc/cmdline.c'
-      - 'kernel/kallsyms.c'
-      - 'mm/memory.c'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   check-susfs-patch:
@@ -71,5 +67,16 @@ jobs:
           set -euo pipefail
           git apply --check --verbose /tmp/susfs-remaining.patch
 
-      - name: Report result
-        run: echo "SUSFS 4.14 patch applies cleanly to this branch. No source files were changed."
+      - name: Apply SUSFS 4.14 backport and commit
+        run: |
+          set -euo pipefail
+          git apply --verbose /tmp/susfs-remaining.patch
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No SUSFS changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fs: apply SUSFS 4.14 backport"
+          git push origin "HEAD:ksu-susfs"
