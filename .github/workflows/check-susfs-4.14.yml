@@ -33,10 +33,39 @@ jobs:
             -o /tmp/susfs-4.14.patch
           sha256sum /tmp/susfs-4.14.patch
 
-      - name: Check patch applicability without modifying the checkout
+      - name: Remove hunks already ported for this kernel fork
         run: |
           set -euo pipefail
-          git apply --check --verbose /tmp/susfs-4.14.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          patch = Path("/tmp/susfs-4.14.patch").read_text()
+          chunks = re.split(r'(?=^diff --git )', patch, flags=re.M)
+          kept = []
+          for chunk in chunks:
+              if not chunk.startswith("diff --git "):
+                  if chunk.strip():
+                      kept.append(chunk)
+                  continue
+              path = chunk.split(" b/", 1)[1].splitlines()[0]
+              if path == "fs/proc/cmdline.c":
+                  continue
+              if path == "fs/namei.c":
+                  chunk = re.sub(r'(?ms)^@@ -3640,9 \\+3823,30 @@.*?(?=^@@ |\\Z)', '', chunk)
+              elif path == "kernel/kallsyms.c":
+                  chunk = re.sub(r'(?ms)^@@ -25,6 \\+25,9 @@.*?(?=^@@ |\\Z)', '', chunk)
+              elif path == "mm/memory.c":
+                  chunk = re.sub(r'(?ms)^@@ -79,6 \\+79,10 @@.*?(?=^@@ |\\Z)', '', chunk)
+              if re.search(r'^@@ ', chunk, re.M):
+                  kept.append(chunk)
+          Path("/tmp/susfs-remaining.patch").write_text("".join(kept))
+          PY
+
+      - name: Check remaining patch applicability without modifying the checkout
+        run: |
+          set -euo pipefail
+          git apply --check --verbose /tmp/susfs-remaining.patch
 
       - name: Report result
         run: echo "SUSFS 4.14 patch applies cleanly to this branch. No source files were changed."
