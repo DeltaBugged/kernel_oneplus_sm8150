@@ -51,14 +51,18 @@ jobs:
               path = chunk.split(" b/", 1)[1].splitlines()[0]
               if path == "fs/proc/cmdline.c":
                   continue
-              if path == "fs/namei.c":
-                  chunk = re.sub(r'(?ms)^@@ -3640,9 \+3823,30 @@.*?(?=^@@ |\\Z)', '', chunk)
-              elif path == "kernel/kallsyms.c":
-                  chunk = re.sub(r'(?ms)^@@ -25,6 \+25,9 @@.*?(?=^@@ |\\Z)', '', chunk)
-              elif path == "mm/memory.c":
-                  chunk = re.sub(r'(?ms)^@@ -79,6 \+79,10 @@.*?(?=^@@ |\\Z)', '', chunk)
-              if re.search(r'^@@ ', chunk, re.M):
-                  kept.append(chunk)
+              parts = re.split(r'(?=^@@ )', chunk, flags=re.M)
+              output = [parts[0]]
+              for hunk in parts[1:]:
+                  if path == "fs/namei.c" and "static int do_o_path" in hunk:
+                      continue
+                  if path == "kernel/kallsyms.c" and "#include <asm/sections.h>" in hunk:
+                      continue
+                  if path == "mm/memory.c" and "#define CREATE_TRACE_POINTS" in hunk:
+                      continue
+                  output.append(hunk)
+              if len(output) > 1:
+                  kept.append("".join(output))
           Path("/tmp/susfs-remaining.patch").write_text("".join(kept))
           PY
 
