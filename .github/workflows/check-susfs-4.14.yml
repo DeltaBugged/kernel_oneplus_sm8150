@@ -6,6 +6,10 @@ on:
       - ksu-susfs
     paths:
       - '.github/workflows/check-susfs-4.14.yml'
+      - 'fs/namei.c'
+      - 'fs/proc/cmdline.c'
+      - 'kernel/kallsyms.c'
+      - 'mm/memory.c'
   workflow_dispatch:
 
 permissions:
