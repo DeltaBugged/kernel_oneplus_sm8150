@@ -34,7 +34,7 @@ jobs:
       - name: Install build dependencies and cross toolchains
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison flex build-essential cpio curl libssl-dev libelf-dev python3 zip clang-14 lld-14 llvm-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+          sudo apt-get install -y bc bison flex build-essential cpio curl libssl-dev libelf-dev python3 zip clang-14 lld-14 llvm-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi device-tree-compiler
 
       - name: Link LLVM 14 tool names expected by this kernel
         run: |
@@ -63,6 +63,7 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             CLANG_TRIPLE=aarch64-linux-gnu- \
+            DTC=/usr/bin/dtc \
             Image.gz-dtb
 
       - name: Diagnose failed device-tree overlay
