@@ -46,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           make ARCH=arm64 O=out vendor/sm8150-perf_defconfig
-          for option in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_KPROBES CONFIG_KRETPROBES CONFIG_KSU_KPROBES_HOOK; do
+          for option in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_KPROBES CONFIG_KSU_MANUAL_HOOK; do
             grep -qx "$option=y" out/.config || { echo "Missing or disabled: $option"; exit 1; }
           done
 
