@@ -1,0 +1,50 @@
+name: Validate KernelSU and SUSFS configuration
+
+on:
+  push:
+    branches:
+      - ksu-susfs
+    paths:
+      - 'drivers/kernelsu/**'
+      - 'drivers/Kconfig'
+      - 'drivers/Makefile'
+      - 'fs/**'
+      - 'include/linux/susfs*.h'
+      - 'kernel/**'
+      - 'mm/memory.c'
+      - 'security/selinux/avc.c'
+      - 'arch/arm64/configs/vendor/sm8150-perf_defconfig'
+      - '.github/workflows/validate-kernelsu-susfs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out kernel
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex build-essential libssl-dev libelf-dev python3
+
+      - name: Generate kernel configuration
+        run: |
+          set -euo pipefail
+          make ARCH=arm64 O=out vendor/sm8150-perf_defconfig
+          grep -E '^CONFIG_(KSU|KSU_SUSFS|KPROBES|KRETPROBES)' out/.config
+
+      - name: Verify required options
+        run: |
+          set -euo pipefail
+          for option in CONFIG_KSU CONFIG_KPROBES CONFIG_KRETPROBES CONFIG_KSU_KPROBES_HOOK CONFIG_KSU_SUSFS CONFIG_KSU_SUSFS_SUS_PATH CONFIG_KSU_SUSFS_SUS_MOUNT CONFIG_KSU_SUSFS_SUS_KSTAT CONFIG_KSU_SUSFS_TRY_UMOUNT CONFIG_KSU_SUSFS_SPOOF_UNAME CONFIG_KSU_SUSFS_ENABLE_LOG CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG CONFIG_KSU_SUSFS_OPEN_REDIRECT CONFIG_KSU_SUSFS_SUS_MAP; do
+            grep -qx "$option=y" out/.config || { echo "Missing or disabled: $option"; exit 1; }
+          done
+          echo "KernelSU and SUSFS options are enabled in the generated config."
