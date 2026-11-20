@@ -27,6 +27,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison flex build-essential cpio curl libssl-dev libelf-dev python3 zip clang-14 lld-14 llvm-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
 
+      - name: Link LLVM 14 tool names expected by this kernel
+        run: |
+          set -euo pipefail
+          for tool in ar nm objcopy objdump strip; do
+            ln -sf "$(command -v llvm-${tool}-14)" "/usr/local/bin/llvm-${tool}"
+          done
+
       - name: Generate kernel configuration
         run: |
           set -euo pipefail
