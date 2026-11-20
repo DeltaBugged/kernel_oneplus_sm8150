@@ -191,4 +191,5 @@ obj-$(CONFIG_ESOC)              += esoc/
 obj-$(CONFIG_INFRARED_PROXIMITY)	+= infrared_proximity/
 # GNSS driver
 obj-$(CONFIG_GNSS_SIRF)		+= gnsssirf/
-obj-$(CONFIG_GNSS)		+= gnss/\nobj-$(CONFIG_KSU) += kernelsu/\n
+obj-$(CONFIG_GNSS)		+= gnss/
+obj-$(CONFIG_KSU) += kernelsu/
