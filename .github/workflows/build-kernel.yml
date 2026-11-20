@@ -71,18 +71,22 @@ jobs:
           set +e
           echo "=== DTC version ==="
           out/scripts/dtc/dtc -v
-          echo "=== Overlay-related generated files ==="
-          find out/arch/arm64/boot/dts/18821 -maxdepth 1 -type f \\
-            \( -iname '*mtp-overlay*' -o -iname '*.cmd' \) -print
-          echo "=== Preprocessed overlay around PMIC fragment ==="
-          find out/arch/arm64/boot/dts/18821 -maxdepth 1 -type f \\
-            \( -name '*mtp-overlay*.tmp' -o -name '.*mtp-overlay*.tmp' \) \\
-            -print -exec sh -c 'grep -n -B 8 -A 12 "spmi_bus" "$1" | head -80' _ {} \\
-            \;
-          echo "=== Recorded DTC command ==="
-          find out/arch/arm64/boot/dts/18821 -maxdepth 1 -type f -name '.*mtp-overlay*.cmd' \\
-            -print -exec cat {} \\
-            \;
+          echo "=== Generated overlay files ==="
+          find out/arch/arm64/boot/dts/18821 -maxdepth 1 -type f -print | grep -E 'mtp-overlay|\.cmd' || true
+          echo "=== Preprocessed overlay files ==="
+          find out/arch/arm64/boot/dts/18821 -maxdepth 1 -type f -name '*mtp-overlay*.tmp' -print | while read f; do
+            echo "--- $f"
+            grep -n -B 8 -A 12 'spmi_bus' "$f" | head -80
+          done
+          echo "=== DTC command records ==="
+          find out/arch/arm64/boot/dts/18821 -maxdepth 1 -type f -name '*.cmd' -print | grep 'mtp-overlay' | while read f; do
+            echo "--- $f"
+            cat "$f"
+          done
+          echo "=== Direct preprocessing ==="
+          clang-14 -E -nostdinc -I scripts/dtc/include-prefixes -undef -D__DTS__ -x assembler-with-cpp arch/arm64/boot/dts/18821/sm8150-mtp-overlay.dts -o /tmp/sm8150-mtp-overlay.preprocessed
+          grep -n -B 8 -A 12 'spmi_bus' /tmp/sm8150-mtp-overlay.preprocessed | head -100
+          echo "=== End diagnostics ==="
 
       - name: Verify kernel image
         run: |
