@@ -51,7 +51,7 @@ jobs:
                   return
               if marker not in data:
                   raise SystemExit(f"{label}: insertion marker not found: {marker}")
-              p.write_text(data.replace(marker, entry + "\\n" + marker, 1))
+              p.write_text(data.replace(marker, entry + "\n" + marker, 1))
 
           insert_once(
               "drivers/Kconfig",
@@ -64,18 +64,18 @@ jobs:
           data = p.read_text()
           entry = "obj-$(CONFIG_KSU) += kernelsu/"
           if entry not in data:
-              p.write_text(data.rstrip() + "\\n" + entry + "\\n")
+              p.write_text(data.rstrip() + "\n" + entry + "\n")
 
           config_entries = [
               "CONFIG_KSU=y",
               "CONFIG_KPROBES=y",
               "CONFIG_KRETPROBES=y",
-              "CONFIG_KSU_KPROBES_HOOK=y",
+              "CONFIG_KSU_MANUAL_HOOK=y",
               "CONFIG_KSU_SUSFS=y",
               "CONFIG_KSU_SUSFS_SUS_PATH=y",
               "CONFIG_KSU_SUSFS_SUS_MOUNT=y",
               "CONFIG_KSU_SUSFS_SUS_KSTAT=y",
-              "CONFIG_KSU_SUSFS_TRY_UMOUNT=y",
+
               "CONFIG_KSU_SUSFS_SPOOF_UNAME=y",
               "CONFIG_KSU_SUSFS_ENABLE_LOG=y",
               "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y",
@@ -90,7 +90,7 @@ jobs:
               marker = "CONFIG_MODULES=y"
               if marker not in data:
                   raise SystemExit("sm8150-perf_defconfig: insertion marker not found")
-              p.write_text(data.replace(marker, "\\n".join(missing) + "\\n" + marker, 1))
+              p.write_text(data.replace(marker, "\n".join(missing) + "\n" + marker, 1))
           PY
 
           git config user.name "github-actions[bot]"
