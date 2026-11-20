@@ -49,6 +49,8 @@ jobs:
           for option in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_KPROBES CONFIG_KSU_MANUAL_HOOK; do
             grep -qx "$option=y" out/.config || { echo "Missing or disabled: $option"; exit 1; }
           done
+          ! grep -qx "CONFIG_KSU_KPROBES_HOOK=y" out/.config || { echo "KSU must use manual hooks on this 4.14 kernel"; exit 1; }
+          grep -qx "# CONFIG_KSU_SUSFS_TRY_UMOUNT is not set" out/.config || { echo "Unported SUSFS try_umount must remain disabled"; exit 1; }
 
       - name: Compile Image.gz-dtb
         run: |
