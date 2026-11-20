@@ -7,6 +7,13 @@ on:
     paths:
       - '.github/workflows/build-kernel.yml'
       - 'BUILDING.md'
+      - 'drivers/**'
+      - 'fs/**'
+      - 'include/linux/**'
+      - 'kernel/**'
+      - 'mm/**'
+      - 'arch/arm64/**'
+      - 'security/**'
   workflow_dispatch:
 
 permissions:
