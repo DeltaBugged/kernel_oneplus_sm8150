@@ -1,0 +1,72 @@
+name: Build KernelSU SUSFS kernel
+
+on:
+  push:
+    branches:
+      - ksu-susfs
+    paths:
+      - '.github/workflows/build-kernel.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Check out kernel source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
+
+      - name: Install build dependencies and cross toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex build-essential cpio curl libssl-dev libelf-dev python3 zip clang-14 lld-14 llvm-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+
+      - name: Generate kernel configuration
+        run: |
+          set -euo pipefail
+          make ARCH=arm64 O=out vendor/sm8150-perf_defconfig
+          for option in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_KPROBES CONFIG_KRETPROBES CONFIG_KSU_KPROBES_HOOK; do
+            grep -qx "$option=y" out/.config || { echo "Missing or disabled: $option"; exit 1; }
+          done
+
+      - name: Compile Image.gz-dtb
+        run: |
+          set -euo pipefail
+          make -j"$(nproc --all)" O=out ARCH=arm64 \
+            CC=clang-14 LD=ld.lld-14 \
+            AR=llvm-ar-14 NM=llvm-nm-14 \
+            OBJCOPY=llvm-objcopy-14 OBJDUMP=llvm-objdump-14 STRIP=llvm-strip-14 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            Image.gz-dtb
+
+      - name: Verify kernel image
+        run: |
+          set -euo pipefail
+          test -s out/arch/arm64/boot/Image.gz-dtb
+          file out/arch/arm64/boot/Image.gz-dtb
+          ls -lh out/arch/arm64/boot/Image.gz-dtb out/vmlinux
+
+      - name: Package build artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp out/arch/arm64/boot/Image.gz-dtb dist/
+          cp out/vmlinux out/System.map dist/
+          cp out/.config dist/kernel.config
+          tar -czf hotdogb-kernelsu-susfs-${{ github.sha }}.tar.gz -C dist .
+
+      - name: Upload kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hotdogb-kernelsu-susfs-${{ github.sha }}
+          path: hotdogb-kernelsu-susfs-${{ github.sha }}.tar.gz
+          if-no-files-found: error
+          retention-days: 14
