@@ -6,6 +6,7 @@ on:
       - ksu-susfs
     paths:
       - '.github/workflows/build-kernel.yml'
+      - 'BUILDING.md'
   workflow_dispatch:
 
 permissions:
