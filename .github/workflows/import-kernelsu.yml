@@ -1,4 +1,4 @@
-name: Import KernelSU from crDroid
+name: Import KernelSU-Next
 
 on:
   workflow_dispatch:
@@ -14,74 +14,69 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
-          path: target
           fetch-depth: 0
-          persist-credentials: true
 
-      - name: Check out only drivers/kernelsu from crDroid
+      - name: Check out KernelSU-Next reference
         uses: actions/checkout@v4
         with:
           repository: crdroidandroid/android_kernel_oneplus_sm8150
           ref: 16.0-ksun
-          path: source
-          sparse-checkout: |
-            drivers/kernelsu
+          path: /tmp/ksu-source
+          sparse-checkout: drivers/kernelsu
           sparse-checkout-cone-mode: true
           fetch-depth: 1
 
-      - name: Import, commit, and push
-        working-directory: target
+      - name: Import KernelSU and wire build configuration
         env:
           BRANCH_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
 
-          mkdir -p drivers
           rm -rf drivers/kernelsu
-          cp -a ../source/drivers/kernelsu drivers/kernelsu
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add drivers/kernelsu
-          if git diff --cached --quiet; then
-            echo "drivers/kernelsu is already identical; no import commit needed."
-          else
-            git commit -m "drivers: import KernelSU from crDroid 16.0-ksun"
-            git push origin "HEAD:${BRANCH_NAME}"
-          fi
+          mkdir -p drivers
+          cp -a /tmp/ksu-source/drivers/kernelsu drivers/kernelsu
 
           python3 - <<'PY'
           from pathlib import Path
 
-          kconfig = Path("drivers/Kconfig")
-          text = kconfig.read_text()
-          entry = 'source "drivers/kernelsu/Kconfig"'
-          if entry not in text:
-              marker = "endmenu"
-              if marker not in text:
-                  raise SystemExit("drivers/Kconfig: endmenu not found")
-              text = text.replace(marker, entry + "\n\n" + marker, 1)
-              kconfig.write_text(text)
+          def insert_once(path, entry, marker, label):
+              p = Path(path)
+              data = p.read_text()
+              if entry in data:
+                  return
+              if marker not in data:
+                  raise SystemExit(f"{label}: insertion marker not found: {marker}")
+              p.write_text(data.replace(marker, entry + "\\n" + marker, 1))
 
-          makefile = Path("drivers/Makefile")
-          text = makefile.read_text()
+          insert_once(
+              "drivers/Kconfig",
+              'source "drivers/kernelsu/Kconfig"',
+              "endmenu",
+              "drivers/Kconfig",
+          )
+
+          p = Path("drivers/Makefile")
+          data = p.read_text()
           entry = "obj-$(CONFIG_KSU) += kernelsu/"
-          if entry not in text:
-              makefile.write_text(text.rstrip() + "\n" + entry + "\n")
+          if entry not in data:
+              p.write_text(data.rstrip() + "\\n" + entry + "\\n")
 
-          config = Path("arch/arm64/configs/vendor/sm8150-perf_defconfig")
-          text = config.read_text()
-          entry = "CONFIG_KSU=y"
-          if entry not in text:
-              marker = "CONFIG_MODULES=y"
-              if marker not in text:
-                  raise SystemExit("sm8150-perf_defconfig: CONFIG_MODULES=y not found")
-              text = text.replace(marker, marker + "\n" + entry, 1)
-              config.write_text(text)
+          insert_once(
+              "arch/arm64/configs/vendor/sm8150-perf_defconfig",
+              "CONFIG_KSU=y",
+              "CONFIG_MODULES=y",
+              "sm8150-perf_defconfig",
+          )
           PY
 
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add drivers/kernelsu drivers/Kconfig drivers/Makefile arch/arm64/configs/vendor/sm8150-perf_defconfig
 
-          echo "===== grep -rn ksu_handle_sys_reboot drivers/kernelsu ====="
-          grep -rn --exclude-dir=.git 'ksu_handle_sys_reboot' drivers/kernelsu || true
+          if git diff --cached --quiet; then
+            echo "KernelSU import already matches this branch; no commit needed."
+            exit 0
+          fi
+
+          git commit -m "drivers: import KernelSU-Next"
+          git push origin "HEAD:${BRANCH_NAME}"
