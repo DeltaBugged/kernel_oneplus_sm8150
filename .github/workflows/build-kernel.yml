@@ -73,11 +73,15 @@ jobs:
           out/scripts/dtc/dtc -v
           echo "=== Generated overlay files ==="
           find out/arch/arm64/boot/dts/18821 -maxdepth 1 -type f -print | grep -E 'mtp-overlay|\.cmd' || true
-          echo "=== Preprocessed overlay files ==="
-          find out/arch/arm64/boot/dts/18821 -maxdepth 1 -type f -name '*mtp-overlay*.tmp' -print | while read f; do
-            echo "--- $f"
-            grep -n -B 8 -A 12 'spmi_bus' "$f" | head -80
-          done
+          echo "=== Generated overlay source: first 80 lines ==="
+          sed -n '1,80p' out/arch/arm64/boot/dts/18821/.sm8150-mtp-overlay.dtbo.dts.tmp
+          echo "=== Plugin and first PMIC fragment ==="
+          grep -n -E '^/dts-v1/|^/plugin/|^&spmi_bus|^# [0-9]+' out/arch/arm64/boot/dts/18821/.sm8150-mtp-overlay.dtbo.dts.tmp | head -50
+          echo "=== DTC command ==="
+          grep -R -n 'sm8150-mtp-overlay' out/arch/arm64/boot/dts/18821 out/arch/arm64/boot/dts 2>/dev/null | head -20
+          echo "=== Direct DTC reproduction ==="
+          out/scripts/dtc/dtc -I dts -O dtb -o /tmp/overlay-test.dtbo -@ out/arch/arm64/boot/dts/18821/.sm8150-mtp-overlay.dtbo.dts.tmp
+          echo "=== End diagnostics ==="
           echo "=== DTC command records ==="
           find out/arch/arm64/boot/dts/18821 -maxdepth 1 -type f -name '*.cmd' -print | grep 'mtp-overlay' | while read f; do
             echo "--- $f"
