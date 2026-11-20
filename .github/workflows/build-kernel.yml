@@ -1,4 +1,5 @@
 name: Build KernelSU SUSFS kernel
+# Re-run against the latest KernelSU-Next import on ksu-susfs.
 
 on:
   push:
