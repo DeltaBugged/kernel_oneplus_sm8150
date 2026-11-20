@@ -1,6 +1,11 @@
 name: Import KernelSU-Next
 
 on:
+  push:
+    branches:
+      - ksu-susfs
+    paths:
+      - '.github/workflows/import-kernelsu.yml'
   workflow_dispatch:
 
 permissions:
@@ -61,12 +66,31 @@ jobs:
           if entry not in data:
               p.write_text(data.rstrip() + "\\n" + entry + "\\n")
 
-          insert_once(
-              "arch/arm64/configs/vendor/sm8150-perf_defconfig",
+          config_entries = [
               "CONFIG_KSU=y",
-              "CONFIG_MODULES=y",
-              "sm8150-perf_defconfig",
-          )
+              "CONFIG_KPROBES=y",
+              "CONFIG_KRETPROBES=y",
+              "CONFIG_KSU_KPROBES_HOOK=y",
+              "CONFIG_KSU_SUSFS=y",
+              "CONFIG_KSU_SUSFS_SUS_PATH=y",
+              "CONFIG_KSU_SUSFS_SUS_MOUNT=y",
+              "CONFIG_KSU_SUSFS_SUS_KSTAT=y",
+              "CONFIG_KSU_SUSFS_TRY_UMOUNT=y",
+              "CONFIG_KSU_SUSFS_SPOOF_UNAME=y",
+              "CONFIG_KSU_SUSFS_ENABLE_LOG=y",
+              "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y",
+              "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y",
+              "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y",
+              "CONFIG_KSU_SUSFS_SUS_MAP=y",
+          ]
+          p = Path("arch/arm64/configs/vendor/sm8150-perf_defconfig")
+          data = p.read_text()
+          missing = [entry for entry in config_entries if entry not in data]
+          if missing:
+              marker = "CONFIG_MODULES=y"
+              if marker not in data:
+                  raise SystemExit("sm8150-perf_defconfig: insertion marker not found")
+              p.write_text(data.replace(marker, "\\n".join(missing) + "\\n" + marker, 1))
           PY
 
           git config user.name "github-actions[bot]"
