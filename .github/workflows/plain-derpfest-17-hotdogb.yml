@@ -34,6 +34,16 @@ jobs:
           set -euo pipefail
           make ARCH=arm64 O=out vendor/sm8150-perf_defconfig
 
+      - name: Merge OPlus configuration
+        run: |
+          set -euo pipefail
+          echo "=== OPLUS/TOUCHPANEL entries in oplus.config ==="
+          grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' arch/arm64/configs/vendor/oplus.config || true
+          scripts/kconfig/merge_config.sh -m -O out out/.config arch/arm64/configs/vendor/oplus.config
+          make ARCH=arm64 O=out olddefconfig
+          echo "=== Effective OPLUS/TOUCHPANEL settings after olddefconfig ==="
+          grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' out/.config || true
+
       - name: Compile Image.gz-dtb
         run: |
           set -euo pipefail
