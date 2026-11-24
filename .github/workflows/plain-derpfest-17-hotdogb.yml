@@ -48,6 +48,83 @@ jobs:
           fi
           echo "Applied Linux 4.14 SukiSU compatibility adjustment"
 
+      - name: Patch SukiSU KPM for Linux 4.14
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          sched_path = Path("include/linux/sched.h")
+          kpm_path = Path("drivers/kernelsu/extension/kpm/kpm.c")
+          super_path = Path("drivers/kernelsu/extension/kpm/super_access.c")
+
+          # Confirm the Linux 4.14 task_struct layout before patching.
+          sched = sched_path.read_text()
+          match = re.search(r"struct task_struct\s*\{(.*?)\n\};", sched, re.S)
+          if not match:
+              raise SystemExit("ERROR: struct task_struct not found in include/linux/sched.h")
+          task_struct = match.group(1)
+          if not re.search(r"\bstruct\s+pid\s*\*\s*thread_pid\s*;", task_struct):
+              raise SystemExit("ERROR: task_struct.thread_pid is missing")
+          if re.search(r"\bpids\s*\[", task_struct):
+              raise SystemExit("ERROR: task_struct unexpectedly contains pids[]")
+
+          # result_code is copied to userspace, so this access must be VERIFY_WRITE.
+          kpm = kpm_path.read_text()
+          access_pattern = re.compile(
+              r"access_ok\(\s*u64_to_user_ptr\(cmd\.result_code\)\s*,\s*sizeof\(result\)\s*\)"
+          )
+          kpm, access_count = access_pattern.subn(
+              "access_ok(VERIFY_WRITE, u64_to_user_ptr(cmd.result_code), sizeof(result))",
+              kpm,
+          )
+          if access_count == 0:
+              if not re.search(
+                  r"access_ok\(\s*VERIFY_WRITE\s*,\s*u64_to_user_ptr\(cmd\.result_code\)\s*,\s*sizeof\(result\)\s*\)",
+                  kpm,
+              ):
+                  raise SystemExit("ERROR: expected result_code access_ok() call was not found")
+          elif access_count != 1:
+              raise SystemExit(f"ERROR: patched {access_count} result_code access_ok() calls; expected one")
+          kpm_path.write_text(kpm)
+
+          # Replace the obsolete pids[] member metadata with the Linux 4.14 thread_pid field.
+          super_access = super_path.read_text()
+          member_pattern = re.compile(
+              r"(?m)^#if\s+LINUX_VERSION_CODE\s*<\s*KERNEL_VERSION\(4,\s*19,\s*0\)\s*\n"
+              r"\s*DEFINE_MEMBER\(task_struct,\s*pids\[PIDTYPE_PID\]\.pid\)\s*\n"
+              r"#else\s*\n"
+              r"\s*DEFINE_MEMBER\(task_struct,\s*thread_pid\)\s*\n"
+              r"#endif"
+          )
+          replacement = (
+              "/* Linux 4.14 stores the struct pid pointer in task_struct.thread_pid. */\n"
+              "DEFINE_MEMBER(task_struct, thread_pid)"
+          )
+          super_access, member_count = member_pattern.subn(replacement, super_access)
+          if member_count == 0:
+              if "DEFINE_MEMBER(task_struct, thread_pid)" not in super_access:
+                  raise SystemExit("ERROR: obsolete task_struct pids[] block not found")
+              if "DEFINE_MEMBER(task_struct, pids[PIDTYPE_PID].pid)" in super_access:
+                  raise SystemExit("ERROR: obsolete task_struct pids[] metadata remains")
+          elif member_count != 1:
+              raise SystemExit(f"ERROR: replaced {member_count} task_struct member blocks; expected one")
+          super_path.write_text(super_access)
+
+          # Fail before compilation if either old API is still present.
+          patched_kpm = kpm_path.read_text()
+          patched_super = super_path.read_text()
+          if re.search(r"access_ok\(\s*u64_to_user_ptr\(cmd\.result_code\)", patched_kpm):
+              raise SystemExit("ERROR: 2-argument access_ok() call remains")
+          if "DEFINE_MEMBER(task_struct, pids[PIDTYPE_PID].pid)" in patched_super:
+              raise SystemExit("ERROR: obsolete task_struct.pids[] metadata remains")
+          if "DEFINE_MEMBER(task_struct, thread_pid)" not in patched_super:
+              raise SystemExit("ERROR: task_struct.thread_pid metadata was not installed")
+
+          print("Applied and verified Linux 4.14 SukiSU KPM compatibility patches")
+          PY
+
       - name: Generate kernel configuration
         run: |
           set -euo pipefail
