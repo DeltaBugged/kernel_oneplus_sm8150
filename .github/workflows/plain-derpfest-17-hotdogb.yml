@@ -79,19 +79,19 @@ jobs:
           echo "=== OPLUS/TOUCHPANEL entries in oplus.config ==="
           grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' arch/arm64/configs/vendor/oplus.config || true
           scripts/kconfig/merge_config.sh -m -O out out/.config arch/arm64/configs/vendor/oplus.config
-          scripts/config --file out/.config -e KSU -e KSU_TAMPER_SYSCALL_TABLE -e KSU_LSM_SECURITY_HOOKS -e KALLSYMS -e KALLSYMS_ALL -d KSU_SUSFS -d KPM
+          scripts/config --file out/.config -e KSU -e KSU_TAMPER_SYSCALL_TABLE -e KALLSYMS -e KALLSYMS_ALL -d KSU_LSM_SECURITY_HOOKS -d KSU_SUSFS -d KPM
           make ARCH=arm64 O=out olddefconfig
           echo "=== Effective OPLUS/TOUCHPANEL settings after olddefconfig ==="
           grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' out/.config || true
           echo "=== SukiSU Nova Linux 4.14 hook configuration ==="
           grep -Fqx 'CONFIG_KSU=y' out/.config || { echo "ERROR: KSU is not enabled"; exit 1; }
           grep -Fqx 'CONFIG_KSU_TAMPER_SYSCALL_TABLE=y' out/.config || { echo "ERROR: syscall-table hook backend is not enabled"; exit 1; }
-          grep -Fqx 'CONFIG_KSU_LSM_SECURITY_HOOKS=y' out/.config || { echo "ERROR: manual LSM hooks are not enabled"; exit 1; }
+          grep -Fqx '# CONFIG_KSU_LSM_SECURITY_HOOKS is not set' out/.config || { echo "ERROR: manual LSM hook implementation must be selected"; exit 1; }
           grep -Fqx '# CONFIG_KSU_SUSFS is not set' out/.config || { echo "ERROR: SUSFS must remain disabled for this build"; exit 1; }
           grep -Fqx '# CONFIG_KPM is not set' out/.config || { echo "ERROR: KPM must be disabled on this 4.14 target"; exit 1; }
           grep -Fqx 'CONFIG_KALLSYMS=y' out/.config || { echo "ERROR: KALLSYMS did not resolve to y"; exit 1; }
           grep -Fqx 'CONFIG_KALLSYMS_ALL=y' out/.config || { echo "ERROR: KALLSYMS_ALL did not resolve to y"; exit 1; }
-          grep -E '^(CONFIG_KSU=|CONFIG_KSU_TAMPER_SYSCALL_TABLE=|CONFIG_KSU_LSM_SECURITY_HOOKS=|# CONFIG_KSU_SUSFS is not set|# CONFIG_KPM is not set)' out/.config
+          grep -E '^(CONFIG_KSU=|CONFIG_KSU_TAMPER_SYSCALL_TABLE=|# CONFIG_KSU_LSM_SECURITY_HOOKS is not set|# CONFIG_KSU_SUSFS is not set|# CONFIG_KPM is not set)' out/.config
 
       - name: Enable built-in Qualcomm WLAN driver
         run: |
@@ -147,12 +147,11 @@ jobs:
 
           properties() { '
           kernel.string=Plain DerpFest 17 for OnePlus 7T
-          do.devicecheck=1
+          do.devicecheck=0
           do.modules=0
           do.systemless=1
           do.cleanup=1
           do.cleanuponabort=0
-          device.name1=hotdogb
           supported.versions=
           supported.patchlevels=
           supported.vendorpatchlevels=
