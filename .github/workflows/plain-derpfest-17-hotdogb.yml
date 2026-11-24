@@ -42,8 +42,12 @@ jobs:
           # Linux 4.14 has no static_call.h; this header is included unconditionally
           # by this SukiSU revision but its static-call API is not used on this target.
           sed -i '/^#include <linux\/static_call\.h>$/d' KernelSU/kernel/kernel_includes.h
-          if grep -Fq '#include <linux/static_call.h>' KernelSU/kernel/kernel_includes.h; then echo 'ERROR: Linux 4.14 static_call include remains'; exit 1; fi
+          if grep -Fq 'linux/static_call.h' KernelSU/kernel/kernel_includes.h; then
+            echo "ERROR: Linux 4.14 static_call include remains"
+            exit 1
+          fi
           echo "Applied Linux 4.14 SukiSU compatibility adjustment"
+
       - name: Generate kernel configuration
         run: |
           set -euo pipefail
