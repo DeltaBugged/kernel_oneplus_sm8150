@@ -1,5 +1,5 @@
-name: ReSukiSU DerpFest 17 hotdogb build
-run-name: "ReSukiSU hotdogb / ${{ github.sha }}"
+name: Delta Kernel - DerpFest 17 hotdogb build
+run-name: "Delta Kernel hotdogb / ${{ github.sha }}"
 
 on:
   workflow_dispatch:
@@ -380,7 +380,7 @@ jobs:
       - name: Upload Image.gz-dtb
         uses: actions/upload-artifact@v4
         with:
-          name: ReSukiSU-Image-gz-dtb-${{ github.sha }}
+          name: Delta-Kernel-Image-gz-dtb-${{ github.sha }}
           path: out/arch/arm64/boot/Image.gz-dtb
           if-no-files-found: error
           retention-days: 14
@@ -396,7 +396,7 @@ jobs:
           ## osm0sis @ xda-developers
 
           properties() { '
-          kernel.string=ReSukiSU DerpFest 17 for OnePlus 7T
+          kernel.string=Delta Kernel | DerpFest 17 | OnePlus 7T
           do.devicecheck=0
           do.modules=0
           do.systemless=1
@@ -419,7 +419,7 @@ jobs:
           EOF
           (
             cd anykernel
-            zip -r9 "$GITHUB_WORKSPACE/hotdogb-derpfest-17-resukisu.zip" . -x '.git/*' 'README.md' '*placeholder'
+            zip -r9 "$GITHUB_WORKSPACE/Delta-Kernel-hotdogb-derpfest-17.zip" . -x '.git/*' 'README.md' '*placeholder'
           )
           unzip -l "$GITHUB_WORKSPACE/hotdogb-derpfest-17-resukisu.zip"
           test -s "$GITHUB_WORKSPACE/hotdogb-derpfest-17-resukisu.zip"
@@ -427,7 +427,7 @@ jobs:
       - name: Upload AnyKernel3 flashable ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: ReSukiSU-AnyKernel3-hotdogb-${{ github.sha }}
-          path: hotdogb-derpfest-17-resukisu.zip
+          name: Delta-Kernel-AnyKernel3-hotdogb-${{ github.sha }}
+          path: Delta-Kernel-hotdogb-derpfest-17.zip
           if-no-files-found: error
           retention-days: 14
