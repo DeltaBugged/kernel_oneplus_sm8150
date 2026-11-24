@@ -249,6 +249,55 @@ jobs:
           #endif
           """)
           
+          replace_once(
+              "kernel/seccomp.c",
+              """#include <linux/sysctl.h>""",
+              """#include <linux/sysctl.h>
+          #include <asm/unistd.h>""")
+          
+          replace_once(
+              "kernel/seccomp.c",
+              """	this_syscall = sd ? sd->nr :
+          		syscall_get_nr(current, task_pt_regs(current));
+          
+          	switch (mode) {""",
+              """	this_syscall = sd ? sd->nr :
+          		syscall_get_nr(current, task_pt_regs(current));
+          
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          	/*
+          	 * Android app seccomp filters commonly deny reboot(2). ReSukiSU
+          	 * obtains its driver fd through this exact reboot supercall, so
+          	 * allow only the KSU magic request to reach kernel/reboot.c.
+          	 * Ordinary reboot requests remain subject to the original filter.
+          	 */
+          	if (mode == SECCOMP_MODE_FILTER && this_syscall == __NR_reboot) {
+          		unsigned long args[6];
+          
+          		if (sd) {
+          			args[0] = sd->args[0];
+          			args[1] = sd->args[1];
+          			args[2] = sd->args[2];
+          		} else {
+          			syscall_get_arguments(current, task_pt_regs(current), 0, 6, args);
+          		}
+          
+          		if ((u32)args[0] == 0xDEADBEEF &&
+          		    (u32)args[1] == 0xCAFEBABE &&
+          		    (u32)args[2] == 0)
+          			return 0;
+          	}
+          #endif
+          
+          	switch (mode) {""")
+          
+          seccomp = Path("kernel/seccomp.c").read_text()
+          for token in ("0xDEADBEEF", "0xCAFEBABE",
+                        "mode == SECCOMP_MODE_FILTER && this_syscall == __NR_reboot"):
+              if token not in seccomp:
+                  raise SystemExit(f"kernel/seccomp.c: missing ReSukiSU seccomp exception {token}")
+          print("Verified narrow ReSukiSU reboot-supercall seccomp exception.")
+          
           required = {
               "fs/exec.c": "ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);",
               "fs/open.c": "ksu_handle_faccessat(&dfd, &filename, &mode, NULL);",
