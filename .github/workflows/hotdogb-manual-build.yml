@@ -1,0 +1,208 @@
+name: Hotdogb manual build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Check out DerpFest 17 source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
+
+      - name: Install build dependencies and Clang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex build-essential cpio curl libssl-dev libelf-dev python3 zip clang-14 lld-14 llvm-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi device-tree-compiler
+
+      - name: Link LLVM 14 tool names expected by this kernel
+        run: |
+          set -euo pipefail
+          for tool in ar nm objcopy objdump strip; do
+            ln -sf "$(command -v llvm-${tool}-14)" "/usr/local/bin/llvm-${tool}"
+          done
+
+      - name: Integrate SukiSU Ultra builtin
+        run: |
+          set -euo pipefail
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Nova/SukiSU-Nova/4bec532dd447e2852aa8932afa768255350c103a/kernel/setup.sh" | bash -s 4bec532dd447e2852aa8932afa768255350c103a
+          test -L drivers/kernelsu
+          grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
+          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          # Linux 4.14 has no static_call.h; this header is included unconditionally
+          # by this SukiSU revision but its static-call API is not used on this target.
+          sed -i '/^#include <linux\/static_call\.h>$/d' KernelSU/kernel/kernel_includes.h
+          if grep -Fq 'linux/static_call.h' KernelSU/kernel/kernel_includes.h; then
+            echo "ERROR: Linux 4.14 static_call include remains"
+            exit 1
+          fi
+          echo "Applied Linux 4.14 SukiSU compatibility adjustment"
+
+      - name: Patch SukiSU KPM for Linux 4.14
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          sched_path = Path("include/linux/sched.h")
+          kpm_path = Path("drivers/kernelsu/extension/kpm/kpm.c")
+          super_path = Path("drivers/kernelsu/extension/kpm/super_access.c")
+
+          # Confirm the actual Linux 4.14 task_struct layout before patching.
+          sched = sched_path.read_text()
+          if "struct task_struct {" not in sched:
+              raise SystemExit("ERROR: struct task_struct not found in include/linux/sched.h")
+          task_struct = sched.split("struct task_struct {", 1)[1].split("\n};", 1)[0]
+          if not re.search(r"\bstruct\s+pid\s*\*\s*thread_pid\s*;", task_struct):
+              raise SystemExit("ERROR: expected task_struct.thread_pid is missing")
+          if re.search(r"\bpids\s*\[", task_struct):
+              raise SystemExit("ERROR: this task_struct unexpectedly contains pids[]; review layout")
+
+          # cmd.result_code is written by copy_to_user(), so VERIFY_WRITE is required.
+          kpm = kpm_path.read_text()
+          old_access = "if (!access_ok(u64_to_user_ptr(cmd.result_code), sizeof(result))) return -EFAULT;"
+          new_access = "if (!access_ok(VERIFY_WRITE, u64_to_user_ptr(cmd.result_code), sizeof(result))) return -EFAULT;"
+          if kpm.count(old_access) == 1:
+              kpm = kpm.replace(old_access, new_access, 1)
+          elif kpm.count(new_access) != 1:
+              raise SystemExit("ERROR: expected one 2-argument result_code access_ok() call in kpm.c")
+          kpm_path.write_text(kpm)
+
+          # Linux 4.14 task_struct has thread_pid; pids[PIDTYPE_PID] is not a member.
+          # get_task_pid() is a runtime helper, not a task_struct field for offsetof metadata.
+          super_access = super_path.read_text()
+          old_member = """#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0)
+          DEFINE_MEMBER(task_struct, pids[PIDTYPE_PID].pid)
+          #else
+          DEFINE_MEMBER(task_struct, thread_pid)
+          #endif"""
+          new_member = """/* Linux 4.14 stores the struct pid pointer in task_struct.thread_pid. */
+          DEFINE_MEMBER(task_struct, thread_pid)"""
+          if super_access.count(old_member) == 1:
+              super_access = super_access.replace(old_member, new_member, 1)
+          elif super_access.count(new_member) != 1:
+              raise SystemExit("ERROR: expected task_struct pids[] compatibility block in super_access.c")
+          super_path.write_text(super_access)
+
+          # Verify both compatibility edits before allowing compilation to continue.
+          if old_access in kpm_path.read_text():
+              raise SystemExit("ERROR: 2-argument access_ok() call remains in kpm.c")
+          if "DEFINE_MEMBER(task_struct, pids[PIDTYPE_PID].pid)" in super_path.read_text():
+              raise SystemExit("ERROR: obsolete task_struct.pids[] metadata remains")
+          if "DEFINE_MEMBER(task_struct, thread_pid)" not in super_path.read_text():
+              raise SystemExit("ERROR: task_struct.thread_pid metadata was not installed")
+
+          print("Applied and verified Linux 4.14 SukiSU KPM compatibility patches")
+          PY
+
+      - name: Generate kernel configuration
+        run: |
+          set -euo pipefail
+          make ARCH=arm64 O=out vendor/sm8150-perf_defconfig
+
+      - name: Merge OPlus configuration
+        run: |
+          set -euo pipefail
+          echo "=== OPLUS/TOUCHPANEL entries in oplus.config ==="
+          grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' arch/arm64/configs/vendor/oplus.config || true
+          scripts/kconfig/merge_config.sh -m -O out out/.config arch/arm64/configs/vendor/oplus.config
+          make ARCH=arm64 O=out olddefconfig
+          echo "=== Effective OPLUS/TOUCHPANEL settings after olddefconfig ==="
+          grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' out/.config || true
+          echo "=== SukiSU Ultra configuration ==="
+          grep -Fqx 'CONFIG_KSU=y' out/.config
+          grep -Fqx '# CONFIG_KSU_SUSFS is not set' out/.config
+          grep -Fqx 'CONFIG_KPM=y' out/.config || { echo "ERROR: KPM did not resolve to y"; exit 1; }
+          grep -Fqx 'CONFIG_KALLSYMS=y' out/.config || { echo "ERROR: KALLSYMS did not resolve to y"; exit 1; }
+          grep -Fqx 'CONFIG_KALLSYMS_ALL=y' out/.config || { echo "ERROR: KALLSYMS_ALL did not resolve to y"; exit 1; }
+          grep -E '^(CONFIG_KSU=|# CONFIG_KSU_SUSFS is not set)' out/.config
+
+      - name: Enable built-in Qualcomm WLAN driver
+        run: |
+          set -euo pipefail
+          scripts/config --file out/.config -e QCA_CLD_WLAN
+          make ARCH=arm64 O=out olddefconfig
+          echo "=== Qualcomm WLAN built-in configuration ==="
+          grep -E '^(CONFIG_(STAGING|QCA_CLD_WLAN))=' out/.config || true
+          grep -Fqx "CONFIG_QCA_CLD_WLAN=y" out/.config || { echo "ERROR: QCA_CLD_WLAN did not resolve to y"; exit 1; }
+
+      - name: Compile Image.gz-dtb
+        run: |
+          set -euo pipefail
+          make -j"$(nproc --all)" O=out ARCH=arm64 \
+            CC=clang-14 LD=ld.lld-14 \
+            AR=llvm-ar-14 NM=llvm-nm-14 \
+            OBJCOPY=llvm-objcopy-14 OBJDUMP=llvm-objdump-14 STRIP=llvm-strip-14 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            DTC=/usr/bin/dtc \
+            Image.gz-dtb
+
+      - name: Verify built-in Qualcomm WLAN driver
+        run: |
+          set -euo pipefail
+          echo "=== Final WLAN configuration ==="
+          grep -Fqx "CONFIG_QCA_CLD_WLAN=y" out/.config || { echo "ERROR: WLAN is not built in"; exit 1; }
+          WLAN_DIR="out/drivers/staging/qcacld-3.0"
+          test -s "$WLAN_DIR/built-in.a" || { echo "ERROR: qcacld-3.0/built-in.a missing"; find "$WLAN_DIR" -maxdepth 2 -type f -print | head -80; exit 1; }
+          test -s "$WLAN_DIR/wlan.o" || { echo "ERROR: qcacld-3.0/wlan.o missing"; exit 1; }
+          echo "Built-in WLAN archive and linked driver object:"
+          ls -lh "$WLAN_DIR/built-in.a" "$WLAN_DIR/wlan.o"
+          echo "WLAN driver is linked into the kernel build; no wlan.ko is required."
+
+      - name: Upload Image.gz-dtb
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image-gz-dtb-${{ github.sha }}
+          path: out/arch/arm64/boot/Image.gz-dtb
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Package AnyKernel3 flashable ZIP
+        run: |
+          set -euo pipefail
+          test -s out/arch/arm64/boot/Image.gz-dtb
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
+          cp out/arch/arm64/boot/Image.gz-dtb anykernel/Image.gz-dtb
+          cat > anykernel/anykernel.sh <<'EOF'
+          ### AnyKernel3 Ramdisk Mod Script
+          ## osm0sis @ xda-developers
+
+          properties() { '
+          kernel.string=Plain DerpFest 17 for OnePlus 7T
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=hotdogb
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; }
+
+          BLOCK=auto;
+          IS_SLOT_DEVICE=auto;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+
+          . tools/ak3-core.sh;
+
+          dump_boot;
+          write_boot;
+          EOF
+          (
+            cd anykernel
+            zip -r9 "$GITHUB_WORKSPACE/hotdogb-derpfest-17-base-test.zip" . -x '.git/*' 'README.md' '*placeholder'
+          )
+          unzip -l "$GITHUB_WORKSPACE/hotdogb-derpfest-17-base-test.zip"
+          test -s "$GITHUB_WORKSPACE/hotdogb-derpfest-17-base-test.zip"
