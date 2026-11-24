@@ -40,8 +40,12 @@ jobs:
           git -C KernelSU checkout --detach "${KSU_COMMIT}"
           test "$(git -C KernelSU rev-parse HEAD)" = "${KSU_COMMIT}"
           ln -s ../KernelSU/kernel drivers/kernelsu
-          printf '\\nobj-$(CONFIG_KSU) += kernelsu/\\n' >> drivers/Makefile
-          printf '\\nsource "drivers/kernelsu/Kconfig"\\n' >> drivers/Kconfig
+          cat >> drivers/Makefile <<'KSU_MAKE_EOF'
+          obj-$(CONFIG_KSU) += kernelsu/
+          KSU_MAKE_EOF
+          cat >> drivers/Kconfig <<'KSU_KCONFIG_EOF'
+          source "drivers/kernelsu/Kconfig"
+          KSU_KCONFIG_EOF
           test -L drivers/kernelsu
           grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
           grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
