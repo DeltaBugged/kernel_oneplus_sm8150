@@ -1,0 +1,384 @@
+name: ReSukiSU DerpFest 17 hotdogb build
+run-name: "ReSukiSU hotdogb / ${{ github.sha }}"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - resukisu
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Check out DerpFest 17 source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
+
+      - name: Install build dependencies and Clang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex build-essential cpio curl libssl-dev libelf-dev python3 zip clang-14 lld-14 llvm-14 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi device-tree-compiler
+
+      - name: Link LLVM 14 tool names expected by this kernel
+        run: |
+          set -euo pipefail
+          for tool in ar nm objcopy objdump strip; do
+            ln -sf "$(command -v llvm-${tool}-14)" "/usr/local/bin/llvm-${tool}"
+          done
+
+      - name: Integrate pinned ReSukiSU source
+        run: |
+          set -euo pipefail
+          RESUKISU_COMMIT=57b2db6076f439cfd489f14576444e8f0f2f0a25
+          curl -fLSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/${RESUKISU_COMMIT}/kernel/setup.sh" -o /tmp/resukisu-setup.sh
+          bash /tmp/resukisu-setup.sh "${RESUKISU_COMMIT}"
+          test "$(git -C KernelSU rev-parse HEAD)" = "${RESUKISU_COMMIT}"
+          test -L drivers/kernelsu
+          test "$(readlink drivers/kernelsu)" = "../KernelSU/kernel"
+          grep -Fq 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
+          grep -Fq 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          grep -Fq 'config KSU_MANUAL_HOOK' KernelSU/kernel/Kconfig
+          grep -Fq 'config KSU_MANUAL_HOOK_AUTO_SETUID_HOOK' KernelSU/kernel/Kconfig
+          grep -Fq 'config KSU_MANUAL_HOOK_AUTO_INITRC_HOOK' KernelSU/kernel/Kconfig
+          grep -Fq 'config KSU_MANUAL_HOOK_AUTO_INPUT_HOOK' KernelSU/kernel/Kconfig
+          echo "ReSukiSU pinned commit: ${RESUKISU_COMMIT}"
+          echo "ReSukiSU pinned commit: ${RESUKISU_COMMIT}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Add and verify Linux 4.14 manual hooks
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          
+          def replace_once(path, old, new):
+              file = Path(path)
+              source = file.read_text()
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one hook insertion point, found {count}")
+              file.write_text(source.replace(old, new, 1))
+          
+          replace_once(
+              "fs/exec.c",
+              """static int __do_execve_file(int fd, struct filename *filename,
+          \t\t\t    struct user_arg_ptr argv,
+          \t\t\t    struct user_arg_ptr envp,
+          \t\t\t    int flags, struct file *file)
+          {
+          \tchar *pathbuf = NULL;
+          \tstruct linux_binprm *bprm;
+          \tstruct files_struct *displaced;
+          \tint retval;
+          """,
+              """static int __do_execve_file(int fd, struct filename *filename,
+          \t\t\t    struct user_arg_ptr argv,
+          \t\t\t    struct user_arg_ptr envp,
+          \t\t\t    int flags, struct file *file)
+          {
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          extern int ksu_handle_execveat(int *, struct filename **, void *, void *, int *);
+          #endif
+          \tchar *pathbuf = NULL;
+          \tstruct linux_binprm *bprm;
+          \tstruct files_struct *displaced;
+          \tint retval;
+          
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          \tksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
+          #endif
+          """)
+          
+          replace_once(
+              "fs/open.c",
+              """SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
+          {
+          \tconst struct cred *old_cred;""",
+              """SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
+          {
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          extern int ksu_handle_faccessat(int *, const char __user **, int *, int *);
+          #endif
+          \tconst struct cred *old_cred;""")
+          
+          replace_once(
+              "fs/open.c",
+              """\tunsigned int lookup_flags = LOOKUP_FOLLOW;
+          
+          
+          \tif (mode & ~S_IRWXO)""",
+              """\tunsigned int lookup_flags = LOOKUP_FOLLOW;
+          
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          \tksu_handle_faccessat(&dfd, &filename, &mode, NULL);
+          #endif
+          
+          \tif (mode & ~S_IRWXO)""")
+          
+          replace_once(
+              "fs/stat.c",
+              """SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
+          \t\tstruct stat __user *, statbuf, int, flag)
+          {
+          \tstruct kstat stat;
+          \tint error;
+          
+          \terror = vfs_fstatat(dfd, filename, &stat, flag);""",
+              """SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
+          \t\tstruct stat __user *, statbuf, int, flag)
+          {
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          extern int ksu_handle_stat(int *, const char __user **, int *);
+          #endif
+          \tstruct kstat stat;
+          \tint error;
+          
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          \tksu_handle_stat(&dfd, &filename, &flag);
+          #endif
+          \terror = vfs_fstatat(dfd, filename, &stat, flag);""")
+          
+          replace_once(
+              "fs/stat.c",
+              """SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
+          {
+          \tstruct kstat stat;
+          \tint error = vfs_fstat(fd, &stat);
+          
+          \tif (!error)
+          \t\terror = cp_new_stat(&stat, statbuf);
+          
+          \treturn error;
+          }""",
+              """SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
+          {
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          extern void ksu_handle_newfstat_ret(unsigned int *, struct stat __user **);
+          #endif
+          \tstruct kstat stat;
+          \tint error = vfs_fstat(fd, &stat);
+          
+          \tif (!error)
+          \t\terror = cp_new_stat(&stat, statbuf);
+          
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          \tksu_handle_newfstat_ret(&fd, &statbuf);
+          #endif
+          \treturn error;
+          }""")
+          
+          replace_once(
+              "fs/stat.c",
+              """SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)
+          {
+          \tstruct kstat stat;
+          \tint error = vfs_fstat(fd, &stat);
+          
+          \tif (!error)
+          \t\terror = cp_new_stat64(&stat, statbuf);
+          
+          \treturn error;
+          }""",
+              """SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)
+          {
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          extern void ksu_handle_fstat64_ret(unsigned long *, struct stat64 __user **);
+          #endif
+          \tstruct kstat stat;
+          \tint error = vfs_fstat(fd, &stat);
+          
+          \tif (!error)
+          \t\terror = cp_new_stat64(&stat, statbuf);
+          
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          \tksu_handle_fstat64_ret(&fd, &statbuf);
+          #endif
+          \treturn error;
+          }""")
+          
+          replace_once(
+              "fs/stat.c",
+              """SYSCALL_DEFINE4(fstatat64, int, dfd, const char __user *, filename,
+          \t\tstruct stat64 __user *, statbuf, int, flag)
+          {
+          \tstruct kstat stat;
+          \tint error;
+          
+          \terror = vfs_fstatat(dfd, filename, &stat, flag);""",
+              """SYSCALL_DEFINE4(fstatat64, int, dfd, const char __user *, filename,
+          \t\tstruct stat64 __user *, statbuf, int, flag)
+          {
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          extern int ksu_handle_stat(int *, const char __user **, int *);
+          #endif
+          \tstruct kstat stat;
+          \tint error;
+          
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          \tksu_handle_stat(&dfd, &filename, &flag);
+          #endif
+          \terror = vfs_fstatat(dfd, filename, &stat, flag);""")
+          
+          replace_once(
+              "kernel/reboot.c",
+              """SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
+          \t\tvoid __user *, arg)
+          {
+          \tstruct pid_namespace *pid_ns = task_active_pid_ns(current);
+          \tchar buffer[256];
+          \tint ret = 0;
+          """,
+              """SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
+          \t\tvoid __user *, arg)
+          {
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          extern int ksu_handle_sys_reboot(int, int, unsigned int, void __user **);
+          #endif
+          \tstruct pid_namespace *pid_ns = task_active_pid_ns(current);
+          \tchar buffer[256];
+          \tint ret = 0;
+          
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          \tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
+          #endif
+          """)
+          
+          required = {
+              "fs/exec.c": "ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);",
+              "fs/open.c": "ksu_handle_faccessat(&dfd, &filename, &mode, NULL);",
+              "fs/stat.c": "ksu_handle_stat(&dfd, &filename, &flag);",
+              "kernel/reboot.c": "ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);",
+          }
+          for path, token in required.items():
+              if token not in Path(path).read_text():
+                  raise SystemExit(f"{path}: missing ReSukiSU manual hook {token}")
+          stat = Path("fs/stat.c").read_text()
+          for token in ("ksu_handle_newfstat_ret(&fd, &statbuf);",
+                        "ksu_handle_fstat64_ret(&fd, &statbuf);"):
+              if token not in stat:
+                  raise SystemExit(f"fs/stat.c: missing ReSukiSU manual hook {token}")
+          print("ReSukiSU Linux 4.14 manual syscall hooks inserted and verified.")
+          PY
+          git diff --check
+          
+
+      - name: Generate kernel configuration
+        run: |
+          set -euo pipefail
+          make ARCH=arm64 O=out vendor/sm8150-perf_defconfig
+
+      - name: Merge OPlus configuration
+        run: |
+          set -euo pipefail
+          echo "=== OPLUS/TOUCHPANEL entries in oplus.config ==="
+          grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' arch/arm64/configs/vendor/oplus.config || true
+          scripts/kconfig/merge_config.sh -m -O out out/.config arch/arm64/configs/vendor/oplus.config
+          scripts/config --file out/.config -e KSU -e KSU_MANUAL_HOOK -e KSU_MANUAL_HOOK_AUTO_SETUID_HOOK -e KSU_MANUAL_HOOK_AUTO_INITRC_HOOK -e KSU_MANUAL_HOOK_AUTO_INPUT_HOOK -e KALLSYMS -e KALLSYMS_ALL -d KSU_TRACEPOINT_HOOK -d KSU_SUSFS
+          make ARCH=arm64 O=out olddefconfig
+          echo "=== Effective OPLUS/TOUCHPANEL settings after olddefconfig ==="
+          grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' out/.config || true
+          echo "=== ReSukiSU Linux 4.14 hook configuration ==="
+          grep -Fqx 'CONFIG_KSU=y' out/.config || { echo "ERROR: KSU is not enabled"; exit 1; }
+          grep -Fqx 'CONFIG_KSU_MANUAL_HOOK=y' out/.config || { echo "ERROR: manual hook mode is not enabled"; exit 1; }
+          grep -Fqx 'CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y' out/.config || { echo "ERROR: automatic LSM setuid hook is not enabled"; exit 1; }
+          grep -Fqx 'CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y' out/.config || { echo "ERROR: automatic init.rc hook is not enabled"; exit 1; }
+          grep -Fqx 'CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y' out/.config || { echo "ERROR: automatic input hook is not enabled"; exit 1; }
+          grep -Fqx '# CONFIG_KSU_TRACEPOINT_HOOK is not set' out/.config || { echo "ERROR: tracepoint hook must be disabled on Linux 4.14"; exit 1; }
+          grep -Fqx '# CONFIG_KSU_SUSFS is not set' out/.config || { echo "ERROR: SUSFS must remain disabled for this build"; exit 1; }
+          grep -Fqx 'CONFIG_KALLSYMS=y' out/.config || { echo "ERROR: KALLSYMS did not resolve to y"; exit 1; }
+          grep -Fqx 'CONFIG_KALLSYMS_ALL=y' out/.config || { echo "ERROR: KALLSYMS_ALL did not resolve to y"; exit 1; }
+          grep -E '^(CONFIG_KSU=|CONFIG_KSU_MANUAL_HOOK=|CONFIG_KSU_MANUAL_HOOK_AUTO_|# CONFIG_KSU_TRACEPOINT_HOOK is not set|# CONFIG_KSU_SUSFS is not set|CONFIG_KALLSYMS=|CONFIG_KALLSYMS_ALL=)' out/.config
+
+      - name: Enable built-in Qualcomm WLAN driver
+        run: |
+          set -euo pipefail
+          scripts/config --file out/.config -e QCA_CLD_WLAN
+          make ARCH=arm64 O=out olddefconfig
+          echo "=== Qualcomm WLAN built-in configuration ==="
+          grep -E '^(CONFIG_(STAGING|QCA_CLD_WLAN))=' out/.config || true
+          grep -Fqx "CONFIG_QCA_CLD_WLAN=y" out/.config || { echo "ERROR: QCA_CLD_WLAN did not resolve to y"; exit 1; }
+
+      - name: Compile Image.gz-dtb
+        run: |
+          set -euo pipefail
+          make -j"$(nproc --all)" O=out ARCH=arm64 \
+            CC=clang-14 LD=ld.lld-14 \
+            AR=llvm-ar-14 NM=llvm-nm-14 \
+            OBJCOPY=llvm-objcopy-14 OBJDUMP=llvm-objdump-14 STRIP=llvm-strip-14 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            DTC=/usr/bin/dtc \
+            Image.gz-dtb
+
+      - name: Verify linked ReSukiSU and Qualcomm WLAN
+        run: |
+          set -euo pipefail
+          grep -Fqx "CONFIG_QCA_CLD_WLAN=y" out/.config || { echo "ERROR: WLAN is not built in"; exit 1; }
+          grep -Fqx "CONFIG_KSU=y" out/.config || { echo "ERROR: ReSukiSU is not enabled"; exit 1; }
+          test -s out/drivers/kernelsu/built-in.a || { echo "ERROR: ReSukiSU built-in archive missing"; find out/drivers/kernelsu -maxdepth 3 -type f -print | head -80; exit 1; }
+          test -s out/drivers/staging/qcacld-3.0/built-in.a || { echo "ERROR: qcacld-3.0/built-in.a missing"; exit 1; }
+          test -s out/drivers/staging/qcacld-3.0/wlan.o || { echo "ERROR: qcacld-3.0/wlan.o missing"; exit 1; }
+          echo "ReSukiSU and Qualcomm WLAN built-in archives verified."
+          ls -lh out/drivers/kernelsu/built-in.a out/drivers/staging/qcacld-3.0/built-in.a out/drivers/staging/qcacld-3.0/wlan.o
+
+      - name: Upload Image.gz-dtb
+        uses: actions/upload-artifact@v4
+        with:
+          name: ReSukiSU-Image-gz-dtb-${{ github.sha }}
+          path: out/arch/arm64/boot/Image.gz-dtb
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Package AnyKernel3 flashable ZIP
+        run: |
+          set -euo pipefail
+          test -s out/arch/arm64/boot/Image.gz-dtb
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
+          cp out/arch/arm64/boot/Image.gz-dtb anykernel/Image.gz-dtb
+          cat > anykernel/anykernel.sh <<'EOF'
+          ### AnyKernel3 Ramdisk Mod Script
+          ## osm0sis @ xda-developers
+
+          properties() { '
+          kernel.string=ReSukiSU DerpFest 17 for OnePlus 7T
+          do.devicecheck=0
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; }
+
+          BLOCK=auto;
+          IS_SLOT_DEVICE=auto;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+
+          . tools/ak3-core.sh;
+
+          dump_boot;
+          write_boot;
+          EOF
+          (
+            cd anykernel
+            zip -r9 "$GITHUB_WORKSPACE/hotdogb-derpfest-17-resukisu.zip" . -x '.git/*' 'README.md' '*placeholder'
+          )
+          unzip -l "$GITHUB_WORKSPACE/hotdogb-derpfest-17-resukisu.zip"
+          test -s "$GITHUB_WORKSPACE/hotdogb-derpfest-17-resukisu.zip"
+
+      - name: Upload AnyKernel3 flashable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: ReSukiSU-AnyKernel3-hotdogb-${{ github.sha }}
+          path: hotdogb-derpfest-17-resukisu.zip
+          if-no-files-found: error
+          retention-days: 14
