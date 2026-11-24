@@ -1983,15 +1983,6 @@ SYSCALL_DEFINE3(execve,
 		const char __user *const __user *, argv,
 		const char __user *const __user *, envp)
 {
-#ifdef CONFIG_KSU
-	struct user_arg_ptr ksu_argv = { .ptr.native = argv };
-	struct user_arg_ptr ksu_envp = { .ptr.native = envp };
-	int ksu_fd = AT_FDCWD;
-	extern int ksu_handle_execve_sucompat(int *, const char __user **,
-					      void *, void *, int *);
-	ksu_handle_execve_sucompat(&ksu_fd, &filename, &ksu_argv,
-				   &ksu_envp, NULL);
-#endif
 	return do_execve(getname(filename), argv, envp);
 }
 
@@ -2002,14 +1993,6 @@ SYSCALL_DEFINE5(execveat,
 		int, flags)
 {
 	int lookup_flags = (flags & AT_EMPTY_PATH) ? LOOKUP_EMPTY : 0;
-#ifdef CONFIG_KSU
-	struct user_arg_ptr ksu_argv = { .ptr.native = argv };
-	struct user_arg_ptr ksu_envp = { .ptr.native = envp };
-	extern int ksu_handle_execve_sucompat(int *, const char __user **,
-					      void *, void *, int *);
-	ksu_handle_execve_sucompat(&fd, &filename, &ksu_argv,
-				   &ksu_envp, &flags);
-#endif
 
 	return do_execveat(fd,
 			   getname_flags(filename, lookup_flags, NULL),
@@ -2021,15 +2004,6 @@ COMPAT_SYSCALL_DEFINE3(execve, const char __user *, filename,
 	const compat_uptr_t __user *, argv,
 	const compat_uptr_t __user *, envp)
 {
-#ifdef CONFIG_KSU
-	struct user_arg_ptr ksu_argv = { .is_compat = true, .ptr.compat = argv };
-	struct user_arg_ptr ksu_envp = { .is_compat = true, .ptr.compat = envp };
-	int ksu_fd = AT_FDCWD;
-	extern int ksu_handle_execve_sucompat(int *, const char __user **,
-					      void *, void *, int *);
-	ksu_handle_execve_sucompat(&ksu_fd, &filename, &ksu_argv,
-				   &ksu_envp, NULL);
-#endif
 	return compat_do_execve(getname(filename), argv, envp);
 }
 
@@ -2040,14 +2014,6 @@ COMPAT_SYSCALL_DEFINE5(execveat, int, fd,
 		       int,  flags)
 {
 	int lookup_flags = (flags & AT_EMPTY_PATH) ? LOOKUP_EMPTY : 0;
-#ifdef CONFIG_KSU
-	struct user_arg_ptr ksu_argv = { .is_compat = true, .ptr.compat = argv };
-	struct user_arg_ptr ksu_envp = { .is_compat = true, .ptr.compat = envp };
-	extern int ksu_handle_execve_sucompat(int *, const char __user **,
-					      void *, void *, int *);
-	ksu_handle_execve_sucompat(&fd, &filename, &ksu_argv,
-				   &ksu_envp, &flags);
-#endif
 
 	return compat_do_execveat(fd,
 				  getname_flags(filename, lookup_flags, NULL),
