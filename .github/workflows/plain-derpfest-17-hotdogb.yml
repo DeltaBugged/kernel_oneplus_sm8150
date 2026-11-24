@@ -2,6 +2,9 @@ name: Plain DerpFest 17 hotdogb build
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - sukisu-ultra
 
 permissions:
   contents: read
@@ -56,6 +59,7 @@ jobs:
           grep -Fqx 'CONFIG_KSU=y' out/.config
           grep -Fqx '# CONFIG_KSU_SUSFS is not set' out/.config
           grep -E '^(CONFIG_KSU=|# CONFIG_KSU_SUSFS is not set)' out/.config
+
       - name: Compile Image.gz-dtb
         run: |
           set -euo pipefail
