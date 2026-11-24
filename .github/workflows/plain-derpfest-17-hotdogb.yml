@@ -38,17 +38,17 @@ jobs:
           KSU_COMMIT=5a3ec4145059ed2c4f22c70a16a28a616e104c33
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Nova/SukiSU-Nova/${KSU_COMMIT}/kernel/setup.sh" | bash -s "${KSU_COMMIT}"
           test -L drivers/kernelsu
-          test "$(git -C KernelSU rev-parse HEAD)" = "${KSU_COMMIT}"
+          test "$(git -C SukiSU-Nova rev-parse HEAD)" = "${KSU_COMMIT}"
           grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
           grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-          grep -q 'config KSU_TAMPER_SYSCALL_TABLE' KernelSU/kernel/Kconfig
-          grep -q 'config KSU_LSM_SECURITY_HOOKS' KernelSU/kernel/Kconfig
+          grep -q 'config KSU_TAMPER_SYSCALL_TABLE' SukiSU-Nova/kernel/Kconfig
+          grep -q 'config KSU_LSM_SECURITY_HOOKS' SukiSU-Nova/kernel/Kconfig
           echo "SukiSU Nova builtin-new pinned to ${KSU_COMMIT}"
 
       - name: Verify SukiSU Nova boot and LSM hook sources
         run: |
           set -euo pipefail
-          KSU=KernelSU/kernel
+          KSU=SukiSU-Nova/kernel
           grep -Fq 'on property:sys.boot_completed=1' "${KSU}/runtime/ksud.c"
           grep -Fq '/system/etc/init/hw/init.rc' "${KSU}/runtime/ksud.c"
           grep -Fq 'void on_boot_completed(void)' "${KSU}/runtime/boot_event.c"
