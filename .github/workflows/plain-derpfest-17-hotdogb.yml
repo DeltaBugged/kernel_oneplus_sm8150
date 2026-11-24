@@ -2,6 +2,9 @@ name: Plain DerpFest 17 hotdogb build
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - sukisu-ultra
 
 permissions:
   contents: read
