@@ -53,7 +53,9 @@ jobs:
           echo "=== Effective OPLUS/TOUCHPANEL settings after olddefconfig ==="
           grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' out/.config || true
           echo "=== SukiSU Ultra configuration ==="
-          grep -q '^CONFIG_KSU=y
+          grep -Fqx 'CONFIG_KSU=y' out/.config
+          grep -Fqx '# CONFIG_KSU_SUSFS is not set' out/.config
+          grep -E '^(CONFIG_KSU=|# CONFIG_KSU_SUSFS is not set)' out/.config
       - name: Compile Image.gz-dtb
         run: |
           set -euo pipefail
