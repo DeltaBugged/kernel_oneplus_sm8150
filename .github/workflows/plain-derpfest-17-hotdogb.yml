@@ -29,6 +29,15 @@ jobs:
             ln -sf "$(command -v llvm-${tool}-14)" "/usr/local/bin/llvm-${tool}"
           done
 
+      - name: Integrate SukiSU Ultra builtin
+        run: |
+          set -euo pipefail
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Nova/SukiSU-Nova/4bec532dd447e2852aa8932afa768255350c103a/kernel/setup.sh" | bash -s 4bec532dd447e2852aa8932afa768255350c103a
+          test -L drivers/kernelsu
+          grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
+          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          echo "SukiSU Ultra builtin source linked successfully"
+
       - name: Generate kernel configuration
         run: |
           set -euo pipefail
@@ -43,6 +52,148 @@ jobs:
           make ARCH=arm64 O=out olddefconfig
           echo "=== Effective OPLUS/TOUCHPANEL settings after olddefconfig ==="
           grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' out/.config || true
+          echo "=== SukiSU Ultra configuration ==="
+          grep -q '^CONFIG_KSU=y
+      - name: Compile Image.gz-dtb
+        run: |
+          set -euo pipefail
+          make -j"$(nproc --all)" O=out ARCH=arm64 \
+            CC=clang-14 LD=ld.lld-14 \
+            AR=llvm-ar-14 NM=llvm-nm-14 \
+            OBJCOPY=llvm-objcopy-14 OBJDUMP=llvm-objdump-14 STRIP=llvm-strip-14 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            DTC=/usr/bin/dtc \
+            Image.gz-dtb
+
+      - name: Upload Image.gz-dtb
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image-gz-dtb-${{ github.sha }}
+          path: out/arch/arm64/boot/Image.gz-dtb
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Package AnyKernel3 flashable ZIP
+        run: |
+          set -euo pipefail
+          test -s out/arch/arm64/boot/Image.gz-dtb
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
+          cp out/arch/arm64/boot/Image.gz-dtb anykernel/Image.gz-dtb
+          cat > anykernel/anykernel.sh <<'EOF'
+          ### AnyKernel3 Ramdisk Mod Script
+          ## osm0sis @ xda-developers
+
+          properties() { '
+          kernel.string=Plain DerpFest 17 for OnePlus 7T
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=hotdogb
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; }
+
+          BLOCK=auto;
+          IS_SLOT_DEVICE=auto;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+
+          . tools/ak3-core.sh;
+
+          dump_boot;
+          write_boot;
+          EOF
+          (
+            cd anykernel
+            zip -r9 "$GITHUB_WORKSPACE/hotdogb-derpfest-17-base-test.zip" . -x '.git/*' 'README.md' '*placeholder'
+          )
+          unzip -l "$GITHUB_WORKSPACE/hotdogb-derpfest-17-base-test.zip"
+          test -s "$GITHUB_WORKSPACE/hotdogb-derpfest-17-base-test.zip"
+
+      - name: Upload AnyKernel3 flashable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: hotdogb-derpfest-17-base-test
+          path: hotdogb-derpfest-17-base-test.zip
+          if-no-files-found: error
+          retention-days: 14
+ out/.config
+          grep -q '^# CONFIG_KSU_SUSFS is not set
+      - name: Compile Image.gz-dtb
+        run: |
+          set -euo pipefail
+          make -j"$(nproc --all)" O=out ARCH=arm64 \
+            CC=clang-14 LD=ld.lld-14 \
+            AR=llvm-ar-14 NM=llvm-nm-14 \
+            OBJCOPY=llvm-objcopy-14 OBJDUMP=llvm-objdump-14 STRIP=llvm-strip-14 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            DTC=/usr/bin/dtc \
+            Image.gz-dtb
+
+      - name: Upload Image.gz-dtb
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image-gz-dtb-${{ github.sha }}
+          path: out/arch/arm64/boot/Image.gz-dtb
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Package AnyKernel3 flashable ZIP
+        run: |
+          set -euo pipefail
+          test -s out/arch/arm64/boot/Image.gz-dtb
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
+          cp out/arch/arm64/boot/Image.gz-dtb anykernel/Image.gz-dtb
+          cat > anykernel/anykernel.sh <<'EOF'
+          ### AnyKernel3 Ramdisk Mod Script
+          ## osm0sis @ xda-developers
+
+          properties() { '
+          kernel.string=Plain DerpFest 17 for OnePlus 7T
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=hotdogb
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; }
+
+          BLOCK=auto;
+          IS_SLOT_DEVICE=auto;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+
+          . tools/ak3-core.sh;
+
+          dump_boot;
+          write_boot;
+          EOF
+          (
+            cd anykernel
+            zip -r9 "$GITHUB_WORKSPACE/hotdogb-derpfest-17-base-test.zip" . -x '.git/*' 'README.md' '*placeholder'
+          )
+          unzip -l "$GITHUB_WORKSPACE/hotdogb-derpfest-17-base-test.zip"
+          test -s "$GITHUB_WORKSPACE/hotdogb-derpfest-17-base-test.zip"
+
+      - name: Upload AnyKernel3 flashable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: hotdogb-derpfest-17-base-test
+          path: hotdogb-derpfest-17-base-test.zip
+          if-no-files-found: error
+          retention-days: 14
+ out/.config
+          grep -E '^(CONFIG_KSU=|# CONFIG_KSU_SUSFS is not set)' out/.config
 
       - name: Compile Image.gz-dtb
         run: |
