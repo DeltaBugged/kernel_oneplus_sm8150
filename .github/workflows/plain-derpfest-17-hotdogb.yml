@@ -60,6 +60,15 @@ jobs:
           grep -Fqx '# CONFIG_KSU_SUSFS is not set' out/.config
           grep -E '^(CONFIG_KSU=|# CONFIG_KSU_SUSFS is not set)' out/.config
 
+      - name: Enable built-in Qualcomm WLAN driver
+        run: |
+          set -euo pipefail
+          scripts/config --file out/.config -e QCA_CLD_WLAN
+          make ARCH=arm64 O=out olddefconfig
+          echo "=== Qualcomm WLAN built-in configuration ==="
+          grep -E '^(CONFIG_(STAGING|QCA_CLD_WLAN))=' out/.config || true
+          grep -Fqx "CONFIG_QCA_CLD_WLAN=y" out/.config || { echo "ERROR: QCA_CLD_WLAN did not resolve to y"; exit 1; }
+
       - name: Compile Image.gz-dtb
         run: |
           set -euo pipefail
@@ -72,6 +81,18 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             DTC=/usr/bin/dtc \
             Image.gz-dtb
+
+      - name: Verify built-in Qualcomm WLAN driver
+        run: |
+          set -euo pipefail
+          echo "=== Final WLAN configuration ==="
+          grep -Fqx "CONFIG_QCA_CLD_WLAN=y" out/.config || { echo "ERROR: WLAN is not built in"; exit 1; }
+          WLAN_DIR="out/drivers/staging/qcacld-3.0"
+          test -s "$WLAN_DIR/built-in.a" || { echo "ERROR: qcacld-3.0/built-in.a missing"; find "$WLAN_DIR" -maxdepth 2 -type f -print | head -80; exit 1; }
+          test -s "$WLAN_DIR/wlan.o" || { echo "ERROR: qcacld-3.0/wlan.o missing"; exit 1; }
+          echo "Built-in WLAN archive and linked driver object:"
+          ls -lh "$WLAN_DIR/built-in.a" "$WLAN_DIR/wlan.o"
+          echo "WLAN driver is linked into the kernel build; no wlan.ko is required."
 
       - name: Upload Image.gz-dtb
         uses: actions/upload-artifact@v4
