@@ -361,10 +361,6 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
  */
 SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
 {
-#ifdef CONFIG_KSU
-	extern int ksu_handle_faccessat(int *, const char __user **, int *, int *);
-	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
-#endif
 	const struct cred *old_cred;
 	struct cred *override_cred;
 	struct path path;
@@ -372,6 +368,11 @@ SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
 	struct vfsmount *mnt;
 	int res;
 	unsigned int lookup_flags = LOOKUP_FOLLOW;
+
+#ifdef CONFIG_KSU
+	extern int ksu_handle_faccessat(int *, const char __user **, int *, int *);
+	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
+#endif
 
 	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */
 		return -EINVAL;
