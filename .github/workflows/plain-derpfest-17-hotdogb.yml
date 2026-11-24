@@ -2,9 +2,6 @@ name: Plain DerpFest 17 hotdogb build
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - sukisu-ultra
 
 permissions:
   contents: read
@@ -32,98 +29,33 @@ jobs:
             ln -sf "$(command -v llvm-${tool}-14)" "/usr/local/bin/llvm-${tool}"
           done
 
-      - name: Integrate SukiSU Ultra builtin
+      - name: Integrate latest SukiSU Nova builtin-new (Linux 4.14)
         run: |
           set -euo pipefail
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Nova/SukiSU-Nova/4bec532dd447e2852aa8932afa768255350c103a/kernel/setup.sh" | bash -s 4bec532dd447e2852aa8932afa768255350c103a
+          KSU_COMMIT=5a3ec4145059ed2c4f22c70a16a28a616e104c33
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Nova/SukiSU-Nova/${KSU_COMMIT}/kernel/setup.sh" | bash -s "${KSU_COMMIT}"
           test -L drivers/kernelsu
+          test "$(git -C KernelSU rev-parse HEAD)" = "${KSU_COMMIT}"
           grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
           grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-          # Linux 4.14 has no static_call.h; this header is included unconditionally
-          # by this SukiSU revision but its static-call API is not used on this target.
-          sed -i '/^#include <linux\/static_call\.h>$/d' KernelSU/kernel/kernel_includes.h
-          if grep -Fq 'linux/static_call.h' KernelSU/kernel/kernel_includes.h; then
-            echo "ERROR: Linux 4.14 static_call include remains"
-            exit 1
-          fi
-          echo "Applied Linux 4.14 SukiSU compatibility adjustment"
+          grep -q 'config KSU_TAMPER_SYSCALL_TABLE' KernelSU/kernel/Kconfig
+          grep -q 'config KSU_LSM_SECURITY_HOOKS' KernelSU/kernel/Kconfig
+          echo "SukiSU Nova builtin-new pinned to ${KSU_COMMIT}"
 
-      - name: Patch SukiSU KPM for Linux 4.14
+      - name: Verify SukiSU Nova boot and LSM hook sources
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          sched_path = Path("include/linux/sched.h")
-          kpm_path = Path("drivers/kernelsu/extension/kpm/kpm.c")
-          super_path = Path("drivers/kernelsu/extension/kpm/super_access.c")
-
-          # Confirm the Linux 4.14 task_struct layout before patching.
-          sched = sched_path.read_text()
-          match = re.search(r"struct task_struct\s*\{(.*?)\n\};", sched, re.S)
-          if not match:
-              raise SystemExit("ERROR: struct task_struct not found in include/linux/sched.h")
-          task_struct = match.group(1)
-          if not re.search(r"\bstruct\s+pid\s*\*\s*thread_pid\s*;", task_struct):
-              raise SystemExit("ERROR: task_struct.thread_pid is missing")
-          if re.search(r"\bpids\s*\[", task_struct):
-              raise SystemExit("ERROR: task_struct unexpectedly contains pids[]")
-
-          # result_code is copied to userspace, so this access must be VERIFY_WRITE.
-          kpm = kpm_path.read_text()
-          access_pattern = re.compile(
-              r"access_ok\(\s*u64_to_user_ptr\(cmd\.result_code\)\s*,\s*sizeof\(result\)\s*\)"
-          )
-          kpm, access_count = access_pattern.subn(
-              "access_ok(VERIFY_WRITE, u64_to_user_ptr(cmd.result_code), sizeof(result))",
-              kpm,
-          )
-          if access_count == 0:
-              if not re.search(
-                  r"access_ok\(\s*VERIFY_WRITE\s*,\s*u64_to_user_ptr\(cmd\.result_code\)\s*,\s*sizeof\(result\)\s*\)",
-                  kpm,
-              ):
-                  raise SystemExit("ERROR: expected result_code access_ok() call was not found")
-          elif access_count != 1:
-              raise SystemExit(f"ERROR: patched {access_count} result_code access_ok() calls; expected one")
-          kpm_path.write_text(kpm)
-
-          # Replace the obsolete pids[] member metadata with the Linux 4.14 thread_pid field.
-          super_access = super_path.read_text()
-          member_pattern = re.compile(
-              r"(?m)^#if\s+LINUX_VERSION_CODE\s*<\s*KERNEL_VERSION\(4,\s*19,\s*0\)\s*\n"
-              r"\s*DEFINE_MEMBER\(task_struct,\s*pids\[PIDTYPE_PID\]\.pid\)\s*\n"
-              r"#else\s*\n"
-              r"\s*DEFINE_MEMBER\(task_struct,\s*thread_pid\)\s*\n"
-              r"#endif"
-          )
-          replacement = (
-              "/* Linux 4.14 stores the struct pid pointer in task_struct.thread_pid. */\n"
-              "DEFINE_MEMBER(task_struct, thread_pid)"
-          )
-          super_access, member_count = member_pattern.subn(replacement, super_access)
-          if member_count == 0:
-              if "DEFINE_MEMBER(task_struct, thread_pid)" not in super_access:
-                  raise SystemExit("ERROR: obsolete task_struct pids[] block not found")
-              if "DEFINE_MEMBER(task_struct, pids[PIDTYPE_PID].pid)" in super_access:
-                  raise SystemExit("ERROR: obsolete task_struct pids[] metadata remains")
-          elif member_count != 1:
-              raise SystemExit(f"ERROR: replaced {member_count} task_struct member blocks; expected one")
-          super_path.write_text(super_access)
-
-          # Fail before compilation if either old API is still present.
-          patched_kpm = kpm_path.read_text()
-          patched_super = super_path.read_text()
-          if re.search(r"access_ok\(\s*u64_to_user_ptr\(cmd\.result_code\)", patched_kpm):
-              raise SystemExit("ERROR: 2-argument access_ok() call remains")
-          if "DEFINE_MEMBER(task_struct, pids[PIDTYPE_PID].pid)" in patched_super:
-              raise SystemExit("ERROR: obsolete task_struct.pids[] metadata remains")
-          if "DEFINE_MEMBER(task_struct, thread_pid)" not in patched_super:
-              raise SystemExit("ERROR: task_struct.thread_pid metadata was not installed")
-
-          print("Applied and verified Linux 4.14 SukiSU KPM compatibility patches")
-          PY
+          KSU=KernelSU/kernel
+          grep -Fq 'on property:sys.boot_completed=1' "${KSU}/runtime/ksud.c"
+          grep -Fq '/system/etc/init/hw/init.rc' "${KSU}/runtime/ksud.c"
+          grep -Fq 'void on_boot_completed(void)' "${KSU}/runtime/boot_event.c"
+          grep -Fq 'void on_module_mounted(void)' "${KSU}/runtime/boot_event.c"
+          grep -Fq 'int ksu_task_fix_setuid' "${KSU}/hook/lsm_hooks_manual.c"
+          grep -Fq 'int ksu_file_permission' "${KSU}/hook/lsm_hooks_manual.c"
+          grep -Fq 'int ksu_inode_rename' "${KSU}/hook/lsm_hooks_manual.c"
+          grep -Fq 'int ksu_hide_setprocattr' "${KSU}/hook/lsm_hooks_manual.c"
+          grep -Fq 'int ksu_hide_inode_setxattr' "${KSU}/hook/lsm_hooks_manual.c"
+          echo "SukiSU Nova boot-completed, module and manual LSM hook sources verified"
 
       - name: Generate kernel configuration
         run: |
@@ -136,16 +68,19 @@ jobs:
           echo "=== OPLUS/TOUCHPANEL entries in oplus.config ==="
           grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' arch/arm64/configs/vendor/oplus.config || true
           scripts/kconfig/merge_config.sh -m -O out out/.config arch/arm64/configs/vendor/oplus.config
+          scripts/config --file out/.config -e KSU -e KSU_TAMPER_SYSCALL_TABLE -e KSU_LSM_SECURITY_HOOKS -e KALLSYMS -e KALLSYMS_ALL -d KSU_SUSFS -d KPM
           make ARCH=arm64 O=out olddefconfig
           echo "=== Effective OPLUS/TOUCHPANEL settings after olddefconfig ==="
           grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' out/.config || true
-          echo "=== SukiSU Ultra configuration ==="
-          grep -Fqx 'CONFIG_KSU=y' out/.config
-          grep -Fqx '# CONFIG_KSU_SUSFS is not set' out/.config
-          grep -Fqx 'CONFIG_KPM=y' out/.config || { echo "ERROR: KPM did not resolve to y"; exit 1; }
+          echo "=== SukiSU Nova Linux 4.14 hook configuration ==="
+          grep -Fqx 'CONFIG_KSU=y' out/.config || { echo "ERROR: KSU is not enabled"; exit 1; }
+          grep -Fqx 'CONFIG_KSU_TAMPER_SYSCALL_TABLE=y' out/.config || { echo "ERROR: syscall-table hook backend is not enabled"; exit 1; }
+          grep -Fqx 'CONFIG_KSU_LSM_SECURITY_HOOKS=y' out/.config || { echo "ERROR: manual LSM hooks are not enabled"; exit 1; }
+          grep -Fqx '# CONFIG_KSU_SUSFS is not set' out/.config || { echo "ERROR: SUSFS must remain disabled for this build"; exit 1; }
+          grep -Fqx '# CONFIG_KPM is not set' out/.config || { echo "ERROR: KPM must be disabled on this 4.14 target"; exit 1; }
           grep -Fqx 'CONFIG_KALLSYMS=y' out/.config || { echo "ERROR: KALLSYMS did not resolve to y"; exit 1; }
           grep -Fqx 'CONFIG_KALLSYMS_ALL=y' out/.config || { echo "ERROR: KALLSYMS_ALL did not resolve to y"; exit 1; }
-          grep -E '^(CONFIG_KSU=|# CONFIG_KSU_SUSFS is not set)' out/.config
+          grep -E '^(CONFIG_KSU=|CONFIG_KSU_TAMPER_SYSCALL_TABLE=|CONFIG_KSU_LSM_SECURITY_HOOKS=|# CONFIG_KSU_SUSFS is not set|# CONFIG_KPM is not set)' out/.config
 
       - name: Enable built-in Qualcomm WLAN driver
         run: |
