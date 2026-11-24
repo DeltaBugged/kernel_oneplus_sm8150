@@ -228,3 +228,10 @@ jobs:
           )
           unzip -l "$GITHUB_WORKSPACE/hotdogb-derpfest-17-base-test.zip"
           test -s "$GITHUB_WORKSPACE/hotdogb-derpfest-17-base-test.zip"
+      - name: Upload AnyKernel3 flashable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnyKernel3-hotdogb-${{ github.sha }}
+          path: hotdogb-derpfest-17-base-test.zip
+          if-no-files-found: error
+          retention-days: 14
