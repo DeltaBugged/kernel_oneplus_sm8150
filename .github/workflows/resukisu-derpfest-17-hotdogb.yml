@@ -151,11 +151,22 @@ jobs:
             "fs/read_write.c:ksu_handle_sys_read(fd, &buf, &count)" \
             "drivers/input/input.c:ksu_handle_input_handle_event" \
             "kernel/reboot.c:ksu_handle_sys_reboot" \
-            "kernel/sys.c:ksu_handle_setresuid" \
-            "security/security.c:ksu_handle_setuid"; do
+            "kernel/sys.c:ksu_handle_setresuid"; do
             IFS=: read -r file symbol <<< "$spec"
             grep -Fq "$symbol" "$file" || { echo "ERROR: missing hook $symbol in $file"; exit 1; }
           done
+
+          # BakaSU v57b2db6 uses its built-in LSM task_fix_setuid hook on
+          # Linux 4.14. The hook is registered from ksu_hook_init(); it is
+          # not a ksu_handle_setuid() call in security/security.c.
+          grep -Fq 'LSM_HOOK_INIT(task_fix_setuid, ksu_task_fix_setuid)' KernelSU/kernel/hook/lsm_hooks.c || {
+            echo "ERROR: BakaSU task_fix_setuid LSM hook is missing"; exit 1;
+          }
+          grep -Fq 'ksu_lsm_hook_built_in_init();' KernelSU/kernel/core/init.c || {
+            echo "ERROR: BakaSU built-in LSM hook initialization is missing"; exit 1;
+          }
+          echo "BakaSU automatic setuid LSM hook registration verified."
+
           grep -Fq '#define SUSFS_VERSION "v2.4.0"' include/linux/susfs.h
           test -s fs/susfs.c
           test -s include/linux/susfs.h
