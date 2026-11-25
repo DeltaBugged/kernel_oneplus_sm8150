@@ -46,8 +46,8 @@ jobs:
           from pathlib import Path
           p = Path("KernelSU/kernel/runtime/ksud_integration.c")
           s = p.read_text()
-          old = "#elif defined(CONFIG_KSU_SUSFS)\\n"
-          new = "#elif defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KSU_MANUAL_HOOK)\\n"
+          old = "#elif defined(CONFIG_KSU_SUSFS)\n"
+          new = "#elif defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KSU_MANUAL_HOOK)\n"
           if s.count(old) != 1:
               raise SystemExit("Expected exactly one ReSukiSU SUSFS hook-selection branch")
           s = s.replace(old, new, 1)
