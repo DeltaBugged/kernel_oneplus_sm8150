@@ -39,6 +39,23 @@ jobs:
           RESUKISU_COMMIT=57b2db6076f439cfd489f14576444e8f0f2f0a25
           curl -fLSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/${RESUKISU_COMMIT}/kernel/setup.sh" -o /tmp/resukisu-setup.sh
           bash /tmp/resukisu-setup.sh "${RESUKISU_COMMIT}"
+          # When SUSFS and manual hooks are both enabled, the upstream SUSFS
+          # preprocessor branch otherwise shadows the manual-hook branch.
+          # That leaves ksu_init_rc_hook undefined while fs/read_write.c uses it.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("KernelSU/kernel/runtime/ksud_integration.c")
+          s = p.read_text()
+          old = "#elif defined(CONFIG_KSU_SUSFS)\\n"
+          new = "#elif defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KSU_MANUAL_HOOK)\\n"
+          if s.count(old) != 1:
+              raise SystemExit("Expected exactly one ReSukiSU SUSFS hook-selection branch")
+          s = s.replace(old, new, 1)
+          if new not in s or "#elif defined(CONFIG_KSU_MANUAL_HOOK)" not in s:
+              raise SystemExit("Manual-hook/SUSFS branch precedence fix did not apply")
+          p.write_text(s)
+          print("Manual-hook branch now takes precedence when SUSFS is enabled.")
+          PY
           test "$(git -C KernelSU rev-parse HEAD)" = "${RESUKISU_COMMIT}"
           test -L drivers/kernelsu
           test "$(readlink drivers/kernelsu)" = "../KernelSU/kernel"
