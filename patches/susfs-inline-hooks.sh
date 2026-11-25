@@ -196,6 +196,75 @@ PY
         sed -i '/error = user_path_at(dfd, filename, lookup_flags, \&path);/a\#endif' fs/stat.c
         sed -i '/fdput(f);/i\#ifdef CONFIG_KSU_SUSFS\n\t\tif (static_branch_unlikely(\&ksu_is_init_rc_hook_enabled))\n\t\t\tksu_handle_vfs_fstat(fd, \&stat->size);\n#endif \/\/ #ifdef CONFIG_KSU_SUSFS\n' fs/stat.c
 
+        # BakaSU's manual-hook checker also requires syscall return hooks.
+        # Patch the actual newfstat/fstat64 syscall bodies, preserving SUSFS hooks.
+        python3 - <<'PY'
+from pathlib import Path
+
+p = Path("fs/stat.c")
+s = p.read_text()
+decl_anchor = "#if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)"
+decl = """#ifdef CONFIG_KSU
+extern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);
+#if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)
+extern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);
+#endif
+#endif
+
+"""
+if "extern void ksu_handle_newfstat_ret(" not in s:
+    if s.count(decl_anchor) != 1:
+        raise SystemExit("Could not find unique stat syscall declaration anchor")
+    s = s.replace(decl_anchor, decl + decl_anchor, 1)
+
+def add_return_hook(source, syscall, hook):
+    start = source.find(syscall)
+    if start < 0:
+        raise SystemExit(f"Could not find {syscall}")
+    end = source.find("\\n}", start)
+    if end < 0:
+        raise SystemExit(f"Could not find end of {syscall}")
+    block = source[start:end]
+    if hook in block:
+        return source
+    needle = "\\treturn error;"
+    if block.count(needle) != 1:
+        raise SystemExit(f"Could not find unique return in {syscall}")
+    insertion = f"""#ifdef CONFIG_KSU
+\\t{hook}
+#endif
+\\treturn error;"""
+    block = block.replace(needle, insertion, 1)
+    return source[:start] + block + source[end:]
+
+s = add_return_hook(
+    s,
+    "SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)",
+    "ksu_handle_newfstat_ret(&fd, &statbuf);"
+)
+s = add_return_hook(
+    s,
+    "SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)",
+    "ksu_handle_fstat64_ret(&fd, &statbuf);"
+)
+for required in (
+    "ksu_handle_newfstat_ret(&fd, &statbuf);",
+    "ksu_handle_fstat64_ret(&fd, &statbuf);",
+):
+    if s.count(required) != 1:
+        raise SystemExit(f"Expected exactly one {required}")
+p.write_text(s)
+PY
+
+        grep -Fq 'ksu_handle_newfstat_ret(&fd, &statbuf);' fs/stat.c || {
+            echo "[-] fs/stat.c newfstat return hook insertion failed"
+            exit 1
+        }
+        grep -Fq 'ksu_handle_fstat64_ret(&fd, &statbuf);' fs/stat.c || {
+            echo "[-] fs/stat.c fstat64 return hook insertion failed"
+            exit 1
+        }
+
         if grep -q "ksu_handle_stat" "fs/stat.c"; then
             echo "[+] fs/stat.c Patched!"
             echo "[+] Count: $(grep -c "ksu_handle_stat" "fs/stat.c")"
