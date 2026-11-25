@@ -49,28 +49,22 @@ jobs:
           grep -Fq 'config KSU_MANUAL_HOOK_AUTO_INITRC_HOOK' KernelSU/kernel/Kconfig
           grep -Fq 'config KSU_MANUAL_HOOK_AUTO_INPUT_HOOK' KernelSU/kernel/Kconfig
           # ReSukiSU's upstream Kconfig puts SUSFS in the hooking-method
-          # choice, making SUSFS and the required manual hooks mutually exclusive.
-          # Move SUSFS to an independent feature option so both can be enabled.
+          # choice, making SUSFS and manual hooks mutually exclusive. Move it
+          # outside that choice so both features can be enabled together.
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p = Path("KernelSU/kernel/Kconfig")
           s = p.read_text()
-          old = """config KSU_SUSFS
-          \tbool "SUSFS Inline Hook"
-          \tdepends on THREAD_INFO_IN_TASK && 64BIT
-          \thelp
-          \t  Patch and Enable SUSFS to kernel with KernelSU.
-          \t  SuSFS Officially support kernel 5.10+
-          \t  This KSU driver support it for 4.3+ in KSU side,
-          \t  But the kernel side susfs compatibility MUST completed by yourself.
-          """
-          if s.count(old) != 1:
-              raise SystemExit("KSU Kconfig: expected SUSFS choice entry not found uniquely")
-          s = s.replace(old, "", 1)
-          marker = "endchoice\n"
-          if s.count(marker) != 1:
+          pattern = r'\nconfig KSU_SUSFS\n\tbool "SUSFS Inline Hook"\n\tdepends on THREAD_INFO_IN_TASK && 64BIT\n\thelp\n(?:\t[^\n]*\n){4}'
+          s, count = re.subn(pattern, "", s, count=1)
+          if count != 1:
+              raise SystemExit("KSU Kconfig: could not isolate SUSFS choice entry")
+          if s.count("endchoice\n") != 1:
               raise SystemExit("KSU Kconfig: expected one hooking-method endchoice")
-          independent = """endchoice
+          s = s.replace(
+              "endchoice\n",
+              """endchoice
 
           config KSU_SUSFS
           \tbool "SUSFS support"
@@ -79,11 +73,13 @@ jobs:
           \thelp
           \t  Enable SUSFS independently of the KernelSU syscall hooking method.
           \t  This allows SUSFS together with manual hooks on legacy kernels.
-          """
-          s = s.replace(marker, independent, 1)
+          """,
+              1,
+          )
           p.write_text(s)
           PY
-          grep -A5 -B2 '^config KSU_SUSFS
+          grep -Fq 'config KSU_SUSFS' KernelSU/kernel/Kconfig
+          echo "ReSukiSU Kconfig: SUSFS and manual hooks are independent options."
           echo "ReSukiSU pinned commit: ${RESUKISU_COMMIT}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Apply SUSFS v2.3.0 Linux 4.14 backport
