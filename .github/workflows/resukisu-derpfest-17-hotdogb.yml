@@ -109,7 +109,7 @@ jobs:
           #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
           \tif (static_branch_likely(&susfs_is_fake_cmdline_or_bootconfig_buffer_set)) {
           \t\tsusfs_spoof_cmdline_or_bootconfig(m);
-          \t\tseq_putc(m, '\n');
+          \t\tseq_putc(m, '\\n');
           \t\treturn 0;
           \t}
           #endif
