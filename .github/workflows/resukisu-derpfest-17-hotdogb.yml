@@ -108,7 +108,7 @@ jobs:
               }
           #endif"""
           new_call = """    if (ksu_initrc_hook_active())
-        ksu_handle_initrc(file);"""
+                    ksu_handle_initrc(file);"""
           if s.count(old_call) != 1:
               raise SystemExit("Could not uniquely locate complete BakaSU init.rc LSM gate block")
           s = s.replace(old_call, new_call, 1)
