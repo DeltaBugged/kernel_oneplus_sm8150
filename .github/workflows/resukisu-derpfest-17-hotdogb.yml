@@ -98,13 +98,19 @@ jobs:
           #else
               if (unlikely(ksu_init_rc_hook))
                   ksu_handle_initrc(file);
-              else {"""
-          new_call = """              if (ksu_initrc_hook_active())
-                  ksu_handle_initrc(file);
-          #if !defined(CONFIG_KSU_SUSFS) && !defined(KSU_COMPAT_USE_STATIC_KEY) && LINUX_VERSION_CODE < KERNEL_VERSION(4, 2, 0)
-              else {"""
+              else {
+          #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 2, 0) && !defined(KSU_COMPAT_HAS_LIST_OF_LSM_HOOKS)
+                  // 4.2- always don't have static key
+                  // static key since 4.3
+                  // there really unregister file_permission
+                  stop_machine(ksu_unregister_file_permission, NULL, NULL);
+          #endif
+              }
+          #endif"""
+          new_call = """    if (ksu_initrc_hook_active())
+        ksu_handle_initrc(file);"""
           if s.count(old_call) != 1:
-              raise SystemExit("Could not uniquely locate BakaSU init.rc LSM gate call")
+              raise SystemExit("Could not uniquely locate complete BakaSU init.rc LSM gate block")
           s = s.replace(old_call, new_call, 1)
           if "ksu_is_init_rc_hook_enabled" not in s or "ksu_initrc_hook_active()" not in s:
               raise SystemExit("SUSFS-aware init.rc LSM gate patch did not apply")
