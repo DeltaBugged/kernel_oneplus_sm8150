@@ -107,23 +107,46 @@ for i in "${patch_files[@]}"; do
         ;;
     ## read_write.c
     fs/read_write.c)
-        sed -i '/SYSCALL_DEFINE3(read,/i #ifdef CONFIG_KSU\nextern struct static_key_true ksu_is_init_rc_hook_enabled;\nextern __attribute__((cold)) int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);\n#endif' fs/read_write.c
-        if grep -q "ksys_read" "fs/read_write.c" >/dev/null 2>&1; then
-            sed -i '/return ksys_read(fd, buf, count);/i #ifdef CONFIG_KSU\n\tif (static_branch_unlikely(\&ksu_is_init_rc_hook_enabled))\n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif' fs/read_write.c
-        else
-            sed -i '0,/if (f\.file) {/{s/if (f\.file) {/\n#ifdef CONFIG_KSU\n\tif (static_branch_unlikely(\&ksu_is_init_rc_hook_enabled))\n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif\n\tif (f.file) {/}' fs/read_write.c
-        fi
+        # Use a structural edit: this kernel implements read() directly with
+        # SYSCALL_DEFINE3 and has no ksys_read() call to hook.
+        python3 - <<'PY'
+from pathlib import Path
+import re
 
-        if grep -q "ksu_init_rc_hook" "fs/read_write.c"; then
-            echo "[+] fs/read_write.c Patched!"
-            echo "[+] Count: $(grep -c "ksu_init_rc_hook" "fs/read_write.c")"
-        elif grep -q "ksu_handle_sys_read" "fs/read_write.c"; then
-            echo "[+] fs/read_write.c Patched!"
-            echo "[+] Count: $(grep -c "ksu_handle_sys_read" "fs/read_write.c")"
-        else
-            echo "[-] fs/read_write.c patch failed for unknown reasons, please provide feedback in time."
-        fi
+p = Path("fs/read_write.c")
+s = p.read_text()
+decl = """#ifdef CONFIG_KSU
+extern struct static_key_true ksu_is_init_rc_hook_enabled;
+extern __attribute__((cold)) int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);
+#endif
 
+"""
+if "ksu_handle_sys_read(fd, &buf, &count);" not in s:
+    # Put the declaration immediately before this tree's read syscall.
+    if "ksu_handle_sys_read(unsigned int fd" not in s:
+        pattern = r"(SYSCALL_DEFINE3\(read,\s*unsigned int,\s*fd,\s*char __user \*,\s*buf,\s*size_t,\s*count\)\s*\{)"
+        s, n = re.subn(pattern, decl + r"\1", s, count=1)
+        if n != 1:
+            raise SystemExit("Could not locate the Linux 4.14 read syscall declaration")
+    # Insert the hook once, at the start of read(), before fd/file handling.
+    pattern = r"(SYSCALL_DEFINE3\(read,[\s\S]*?ssize_t ret = -EBADF;\s*)"
+    call = """\n#ifdef CONFIG_KSU
+\tif (static_branch_unlikely(&ksu_is_init_rc_hook_enabled))
+\t\tksu_handle_sys_read(fd, &buf, &count);
+#endif
+"""
+    s, n = re.subn(pattern, lambda m: m.group(1) + call, s, count=1)
+    if n != 1:
+        raise SystemExit("Could not insert the KernelSU read hook into SYSCALL_DEFINE3(read)")
+if s.count("ksu_handle_sys_read(fd, &buf, &count);") != 1:
+    raise SystemExit("Expected exactly one active ksu_handle_sys_read() call")
+p.write_text(s)
+PY
+        grep -Fq 'ksu_handle_sys_read(fd, &buf, &count);' fs/read_write.c || {
+            echo "[-] fs/read_write.c read hook insertion failed"
+            exit 1
+        }
+        echo "[+] fs/read_write.c read hook inserted and verified."
         echo "======================================"
         ;;
     ## stat.c
