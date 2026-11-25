@@ -57,12 +57,56 @@ jobs:
           SUSFS_PATCH_URL="https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/Patch/susfs_patch_to_4.14.patch"
           curl -fLSs "${SUSFS_PATCH_URL}" -o /tmp/susfs-4.14-v2.3.0.patch
           grep -q 'SUSFS' /tmp/susfs-4.14-v2.3.0.patch
-          patch --dry-run --batch --forward -p1 < /tmp/susfs-4.14-v2.3.0.patch
-          patch --batch --forward -p1 < /tmp/susfs-4.14-v2.3.0.patch
+          # This kernel has a customized cmdline implementation for boot flags.
+          # Apply the upstream 4.14 backport everywhere except cmdline.c, then
+          # integrate SUSFS spoofing into the existing proc_command_line buffer.
+          patch --dry-run --batch --forward --exclude=fs/proc/cmdline.c -p1 < /tmp/susfs-4.14-v2.3.0.patch
+          patch --batch --forward --exclude=fs/proc/cmdline.c -p1 < /tmp/susfs-4.14-v2.3.0.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("fs/proc/cmdline.c")
+          s = p.read_text()
+          anchor = "#include <asm/setup.h>\n"
+          decl = """#include <asm/setup.h>
+
+          #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+          extern struct static_key_false susfs_is_fake_cmdline_or_bootconfig_buffer_set;
+          extern void susfs_spoof_cmdline_or_bootconfig(struct seq_file *m);
+          #endif
+          """
+          if "susfs_spoof_cmdline_or_bootconfig" not in s:
+              if s.count(anchor) != 1:
+                  raise SystemExit("cmdline.c: expected include insertion point not found")
+              s = s.replace(anchor, decl, 1)
+          old_show = """static int cmdline_proc_show(struct seq_file *m, void *v)
+          {
+          \tseq_printf(m, "%s\\n", proc_command_line);
+          \treturn 0;
+          }"""
+          new_show = """static int cmdline_proc_show(struct seq_file *m, void *v)
+          {
+          #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+          \tif (static_branch_likely(&susfs_is_fake_cmdline_or_bootconfig_buffer_set)) {
+          \t\tsusfs_spoof_cmdline_or_bootconfig(m);
+          \t\tseq_putc(m, '\\n');
+          \t\treturn 0;
+          \t}
+          #endif
+          \tseq_printf(m, "%s\\n", proc_command_line);
+          \treturn 0;
+          }"""
+          if new_show not in s:
+              if s.count(old_show) != 1:
+                  raise SystemExit("cmdline.c: expected proc_command_line show function not found")
+              s = s.replace(old_show, new_show, 1)
+          p.write_text(s)
+          if "susfs_spoof_cmdline_or_bootconfig(m);" not in s or 'seq_printf(m, "%s\\n", proc_command_line);' not in s:
+              raise SystemExit("cmdline.c: SUSFS integration or original boot cmdline path missing")
+          PY
           test -s fs/susfs.c
           test -s include/linux/susfs.h
           test -s include/linux/susfs_def.h
-          echo "SUSFS v2.3.0 Linux 4.14 patch applied cleanly."
+          echo "SUSFS v2.3.0 Linux 4.14 backport applied; custom cmdline support preserved."
 
       - name: Add and verify Linux 4.14 manual hooks
         run: |
