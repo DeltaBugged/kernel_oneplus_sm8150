@@ -48,35 +48,35 @@ jobs:
           grep -Fq 'config KSU_MANUAL_HOOK_AUTO_SETUID_HOOK' KernelSU/kernel/Kconfig
           grep -Fq 'config KSU_MANUAL_HOOK_AUTO_INITRC_HOOK' KernelSU/kernel/Kconfig
           grep -Fq 'config KSU_MANUAL_HOOK_AUTO_INPUT_HOOK' KernelSU/kernel/Kconfig
-          # ReSukiSU's upstream Kconfig puts SUSFS in the hooking-method
-          # choice, making SUSFS and manual hooks mutually exclusive. Move it
-          # outside that choice so both features can be enabled together.
+          # Move SUSFS out of the hook-method choice: manual hooks and SUSFS
+          # must be independently selectable on this legacy kernel.
           python3 - <<'PY'
           from pathlib import Path
-          import re
           p = Path("KernelSU/kernel/Kconfig")
-          s = p.read_text()
-          pattern = r'\nconfig KSU_SUSFS\n\tbool "SUSFS Inline Hook"\n\tdepends on THREAD_INFO_IN_TASK && 64BIT\n\thelp\n(?:\t[^\n]*\n){4}'
-          s, count = re.subn(pattern, "", s, count=1)
-          if count != 1:
-              raise SystemExit("KSU Kconfig: could not isolate SUSFS choice entry")
-          if s.count("endchoice\n") != 1:
-              raise SystemExit("KSU Kconfig: expected one hooking-method endchoice")
-          s = s.replace(
-              "endchoice\n",
-              """endchoice
-
-          config KSU_SUSFS
-          \tbool "SUSFS support"
-          \tdepends on KSU && THREAD_INFO_IN_TASK && 64BIT
-          \tdefault n
-          \thelp
-          \t  Enable SUSFS independently of the KernelSU syscall hooking method.
-          \t  This allows SUSFS together with manual hooks on legacy kernels.
-          """,
-              1,
-          )
-          p.write_text(s)
+          lines = p.read_text().splitlines()
+          matches = [i for i, line in enumerate(lines) if line == "config KSU_SUSFS"]
+          if len(matches) != 1:
+              raise SystemExit("Expected exactly one KSU_SUSFS Kconfig entry")
+          i = matches[0]
+          susfs = lines[i:i + 8]
+          if len(susfs) != 8 or 'SUSFS Inline Hook' not in susfs[1]:
+              raise SystemExit("Unexpected KSU_SUSFS Kconfig stanza")
+          del lines[i:i + 8]
+          choices = [i for i, line in enumerate(lines) if line == "endchoice"]
+          if len(choices) != 1:
+              raise SystemExit("Expected exactly one KernelSU hook-method endchoice")
+          option = [
+              "",
+              "config KSU_SUSFS",
+              '\tbool "SUSFS support"',
+              '\tdepends on KSU && THREAD_INFO_IN_TASK && 64BIT',
+              '\tdefault n',
+              '\thelp',
+              '\t  Enable SUSFS independently of the KernelSU syscall hooking method.',
+              '\t  This allows SUSFS together with manual hooks on legacy kernels.',
+          ]
+          lines[choices[0] + 1:choices[0] + 1] = option
+          p.write_text("\n".join(lines) + "\n")
           PY
           grep -Fq 'config KSU_SUSFS' KernelSU/kernel/Kconfig
           echo "ReSukiSU Kconfig: SUSFS and manual hooks are independent options."
