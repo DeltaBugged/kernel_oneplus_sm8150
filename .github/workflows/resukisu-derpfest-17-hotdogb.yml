@@ -39,23 +39,6 @@ jobs:
           RESUKISU_COMMIT=57b2db6076f439cfd489f14576444e8f0f2f0a25
           curl -fLSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/${RESUKISU_COMMIT}/kernel/setup.sh" -o /tmp/resukisu-setup.sh
           bash /tmp/resukisu-setup.sh "${RESUKISU_COMMIT}"
-          # When SUSFS and manual hooks are both enabled, the upstream SUSFS
-          # preprocessor branch otherwise shadows the manual-hook branch.
-          # That leaves ksu_init_rc_hook undefined while fs/read_write.c uses it.
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("KernelSU/kernel/runtime/ksud_integration.c")
-          s = p.read_text()
-          old = "#elif defined(CONFIG_KSU_SUSFS)\n"
-          new = "#elif defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KSU_MANUAL_HOOK)\n"
-          if s.count(old) != 1:
-              raise SystemExit("Expected exactly one ReSukiSU SUSFS hook-selection branch")
-          s = s.replace(old, new, 1)
-          if new not in s or "#elif defined(CONFIG_KSU_MANUAL_HOOK)" not in s:
-              raise SystemExit("Manual-hook/SUSFS branch precedence fix did not apply")
-          p.write_text(s)
-          print("Manual-hook branch now takes precedence when SUSFS is enabled.")
-          PY
           test "$(git -C KernelSU rev-parse HEAD)" = "${RESUKISU_COMMIT}"
           test -L drivers/kernelsu
           test "$(readlink drivers/kernelsu)" = "../KernelSU/kernel"
@@ -334,93 +317,6 @@ jobs:
           git diff --check
           
 
-      - name: Integrate SUSFS v2.4.0
-        run: |
-          set -euo pipefail
-          curl -fLSs "https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/Patch/susfs_patch_to_4.14.patch" -o /tmp/susfs.patch
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("KernelSU/kernel/Kconfig")
-          s = p.read_text()
-          start = s.index("config KSU_SUSFS\n")
-          end = s.index("endchoice", start)
-          block = s[start:end].rstrip()
-          s = s[:start] + s[end:]
-          pos = s.index("endchoice") + len("endchoice")
-          s = s[:pos] + "\n\n" + block + s[pos:]
-          if s.index("config KSU_SUSFS") < s.index("endchoice"):
-              raise SystemExit("KSU_SUSFS remains inside choice")
-          p.write_text(s)
-          PY
-          python3 - <<'PY'
-          from pathlib import Path
-          src = Path("/tmp/susfs.patch").read_text()
-          sections = src.split("diff --git ")[1:]
-          kept = []
-          for section in sections:
-              if section.startswith("a/fs/proc/cmdline.c "):
-                  continue
-              kept.append("diff --git " + section)
-          Path("/tmp/susfs-filtered.patch").write_text("".join(kept))
-          PY
-          patch --batch --forward --dry-run -p1 < /tmp/susfs-filtered.patch
-          patch --batch --forward -p1 < /tmp/susfs-filtered.patch
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("fs/proc/cmdline.c")
-          s = p.read_text()
-          old = 'static int cmdline_proc_show(struct seq_file *m, void *v)\n{\n\tseq_printf(m, "%s\\n", proc_command_line);\n\treturn 0;\n}'
-          new = '''#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-          extern struct static_key_false susfs_is_fake_cmdline_or_bootconfig_buffer_set;
-          extern void susfs_spoof_cmdline_or_bootconfig(struct seq_file *m);
-          #endif
-
-          static int cmdline_proc_show(struct seq_file *m, void *v)
-          {
-          #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-          \tif (static_branch_likely(&susfs_is_fake_cmdline_or_bootconfig_buffer_set)) {
-          \t\tsusfs_spoof_cmdline_or_bootconfig(m);
-          \t\tseq_putc(m, '\\n');
-          \t\treturn 0;
-          \t}
-          #endif
-          \tseq_printf(m, "%s\\n", proc_command_line);
-          \treturn 0;
-          }'''
-          if s.count(old) != 1:
-              raise SystemExit("Custom cmdline function did not match")
-          p.write_text(s.replace(old, new, 1))
-          PY
-          # fs/stat.c's upstream KSTAT hunk uses SUSFS helper/macros.
-          # On this 4.14 tree those are provided by susfs_def.h, not linux/stat.h.
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("fs/stat.c")
-          s = p.read_text()
-          inc = """#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-          #include <linux/susfs_def.h>
-          #endif
-          """
-          if "include <linux/susfs_def.h>" not in s:
-              anchor = "#include <asm/unistd.h>\n"
-              if s.count(anchor) != 1:
-                  raise SystemExit("Could not find unique fs/stat.c include insertion point")
-              s = s.replace(anchor, anchor + "\n" + inc, 1)
-          for token in ("susfs_is_current_app_uid", "STATX_SUS_KSTAT", "STATX_SUS_KSTAT_FUSE"):
-              if token not in s:
-                  raise SystemExit(f"fs/stat.c missing expected KSTAT token: {token}")
-          if "include <linux/susfs_def.h>" not in s:
-              raise SystemExit("SUSFS KSTAT definitions header was not included")
-          p.write_text(s)
-          print("fs/stat.c now imports SUSFS KSTAT flags and current-app UID helper.")
-          PY
-          test -s fs/susfs.c
-          test -s include/linux/susfs.h
-          test -s include/linux/susfs_def.h
-          grep -Fq '#define SUSFS_VERSION "v2.4.0"' include/linux/susfs.h
-          grep -Fq 'susfs_spoof_cmdline_or_bootconfig(m)' fs/proc/cmdline.c
-          git diff --check
-
       - name: Generate kernel configuration
         run: |
           set -euo pipefail
@@ -432,7 +328,7 @@ jobs:
           echo "=== OPLUS/TOUCHPANEL entries in oplus.config ==="
           grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' arch/arm64/configs/vendor/oplus.config || true
           scripts/kconfig/merge_config.sh -m -O out out/.config arch/arm64/configs/vendor/oplus.config
-          scripts/config --file out/.config -e KSU -e KSU_MANUAL_HOOK -e KSU_MANUAL_HOOK_AUTO_SETUID_HOOK -e KSU_MANUAL_HOOK_AUTO_INITRC_HOOK -e KSU_MANUAL_HOOK_AUTO_INPUT_HOOK -e KSU_SUSFS -e KSU_SUSFS_SUS_PATH -e KSU_SUSFS_SUS_MOUNT -e KSU_SUSFS_SUS_KSTAT -e KSU_SUSFS_SPOOF_UNAME -e KSU_SUSFS_ENABLE_LOG -e KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS -e KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG -e KSU_SUSFS_OPEN_REDIRECT -e KSU_SUSFS_SUS_MAP -e KSU_SUSFS_PRIORITY_UID_FILTER -e THREAD_INFO_IN_TASK -e KALLSYMS -e KALLSYMS_ALL -d KSU_TRACEPOINT_HOOK
+          scripts/config --file out/.config -e KSU -e KSU_MANUAL_HOOK -e KSU_MANUAL_HOOK_AUTO_SETUID_HOOK -e KSU_MANUAL_HOOK_AUTO_INITRC_HOOK -e KSU_MANUAL_HOOK_AUTO_INPUT_HOOK -e THREAD_INFO_IN_TASK -e KALLSYMS -e KALLSYMS_ALL -d KSU_TRACEPOINT_HOOK -d KSU_SUSFS
           make ARCH=arm64 O=out olddefconfig
           echo "=== Effective OPLUS/TOUCHPANEL settings after olddefconfig ==="
           grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' out/.config || true
@@ -443,14 +339,10 @@ jobs:
           grep -Fqx 'CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y' out/.config || { echo "ERROR: automatic init.rc hook is not enabled"; exit 1; }
           grep -Fqx 'CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y' out/.config || { echo "ERROR: automatic input hook is not enabled"; exit 1; }
           grep -Fqx '# CONFIG_KSU_TRACEPOINT_HOOK is not set' out/.config || { echo "ERROR: tracepoint hook must be disabled on Linux 4.14"; exit 1; }
-          grep -Fqx 'CONFIG_KSU_SUSFS=y' out/.config || { echo "ERROR: SUSFS is not enabled"; exit 1; }
-          grep -Fqx 'CONFIG_KSU_SUSFS_SUS_PATH=y' out/.config || { echo "ERROR: SUS_PATH is not enabled"; exit 1; }
-          grep -Fqx 'CONFIG_KSU_SUSFS_SUS_MOUNT=y' out/.config || { echo "ERROR: SUS_MOUNT is not enabled"; exit 1; }
-          grep -Fqx 'CONFIG_KSU_SUSFS_SUS_KSTAT=y' out/.config || { echo "ERROR: SUS_KSTAT is not enabled"; exit 1; }
-          grep -Fqx 'CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y' out/.config || { echo "ERROR: cmdline spoofing is not enabled"; exit 1; }
+          grep -Fqx '# CONFIG_KSU_SUSFS is not set' out/.config || { echo "ERROR: SUSFS must remain disabled"; exit 1; }
           grep -Fqx 'CONFIG_KALLSYMS=y' out/.config || { echo "ERROR: KALLSYMS did not resolve to y"; exit 1; }
           grep -Fqx 'CONFIG_KALLSYMS_ALL=y' out/.config || { echo "ERROR: KALLSYMS_ALL did not resolve to y"; exit 1; }
-          grep -E '^(CONFIG_KSU=|CONFIG_KSU_MANUAL_HOOK=|CONFIG_KSU_MANUAL_HOOK_AUTO_|# CONFIG_KSU_TRACEPOINT_HOOK is not set|CONFIG_KSU_SUSFS=|CONFIG_KALLSYMS=|CONFIG_KALLSYMS_ALL=)' out/.config
+          grep -E '^(CONFIG_KSU=|CONFIG_KSU_MANUAL_HOOK=|CONFIG_KSU_MANUAL_HOOK_AUTO_|# CONFIG_KSU_TRACEPOINT_HOOK is not set|CONFIG_KALLSYMS=|CONFIG_KALLSYMS_ALL=)' out/.config
 
       - name: Enable built-in Qualcomm WLAN driver
         run: |
