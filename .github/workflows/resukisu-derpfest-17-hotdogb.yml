@@ -421,8 +421,8 @@ jobs:
             cd anykernel
             zip -r9 "$GITHUB_WORKSPACE/Delta-Kernel-hotdogb-derpfest-17.zip" . -x '.git/*' 'README.md' '*placeholder'
           )
-          unzip -l "$GITHUB_WORKSPACE/hotdogb-derpfest-17-resukisu.zip"
-          test -s "$GITHUB_WORKSPACE/hotdogb-derpfest-17-resukisu.zip"
+          unzip -t "$GITHUB_WORKSPACE/Delta-Kernel-hotdogb-derpfest-17.zip"
+          test -s "$GITHUB_WORKSPACE/Delta-Kernel-hotdogb-derpfest-17.zip"
 
       - name: Upload AnyKernel3 flashable ZIP
         uses: actions/upload-artifact@v4
