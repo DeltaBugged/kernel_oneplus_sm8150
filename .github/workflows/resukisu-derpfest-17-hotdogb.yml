@@ -42,6 +42,26 @@ jobs:
           test "$(git -C KernelSU rev-parse HEAD)" = "${BAKASU_COMMIT}"
           test -L drivers/kernelsu
           test "$(readlink drivers/kernelsu)" = "../KernelSU/kernel"
+
+          # Linux 4.14 + Clang LTO can leave the init.rc static-key
+          # jump-table relocation without its key symbol. Keep this one
+          # runtime gate as a normal bool on 4.14; newer kernels retain
+          # BakaSU's static-key implementation.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("KernelSU/kernel/runtime/ksud_integration.c")
+          s = p.read_text()
+          old = "#if defined(CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK) && defined(KSU_COMPAT_USE_STATIC_KEY)"
+          new = old + " && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0)"
+          if s.count(old) != 1:
+              raise SystemExit("Expected exactly one BakaSU init.rc static-key selector")
+          s = s.replace(old, new, 1)
+          if new not in s or "bool ksu_init_rc_hook __read_mostly = true;" not in s:
+              raise SystemExit("Linux 4.14 init.rc bool fallback was not selected")
+          p.write_text(s)
+          print("Linux 4.14: using bool init.rc hook gate (avoids unresolved LTO jump-table key)")
+          PY
+
           grep -Fq 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile
           grep -Fq 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           grep -Fq 'config KSU_MANUAL_HOOK' KernelSU/kernel/Kconfig
