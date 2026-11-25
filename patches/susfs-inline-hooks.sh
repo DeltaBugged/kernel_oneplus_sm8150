@@ -143,6 +143,9 @@ if "ksu_handle_sys_read(fd, &buf, &count);" not in s:
         raise SystemExit("Could not insert the KernelSU read hook into SYSCALL_DEFINE3(read)")
 if s.count("ksu_handle_sys_read(fd, &buf, &count);") != 1:
     raise SystemExit("Expected exactly one active ksu_handle_sys_read() call")
+# Remove whitespace-only lines left behind by the original kernel source or
+# the inserted hook so the workflow's final git diff --check stays clean.
+s = re.sub(r"(?m)^[ \\t]+$", "", s)
 p.write_text(s)
 PY
         grep -Fq 'ksu_handle_sys_read(fd, &buf, &count);' fs/read_write.c || {
