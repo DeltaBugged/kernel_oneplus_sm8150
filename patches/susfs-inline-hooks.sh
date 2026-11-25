@@ -129,13 +129,16 @@ if "ksu_handle_sys_read(fd, &buf, &count);" not in s:
         if n != 1:
             raise SystemExit("Could not locate the Linux 4.14 read syscall declaration")
     # Insert the hook once, at the start of read(), before fd/file handling.
-    pattern = r"(SYSCALL_DEFINE3\(read,[\s\S]*?ssize_t ret = -EBADF;\s*)"
+    # Match only horizontal whitespace after the initializer. Using \s*
+    # here also consumes the following newline/indentation, preserving a
+    # tab-only blank line that makes git diff --check fail.
+    pattern = r"(SYSCALL_DEFINE3\(read,[\s\S]*?ssize_t ret = -EBADF;[ \t]*)"
     call = """\n#ifdef CONFIG_KSU
 \tif (static_branch_unlikely(&ksu_is_init_rc_hook_enabled))
 \t\tksu_handle_sys_read(fd, &buf, &count);
 #endif
 """
-    s, n = re.subn(pattern, lambda m: m.group(1) + call, s, count=1)
+    s, n = re.subn(pattern, lambda m: m.group(1).rstrip(" \t") + call, s, count=1)
     if n != 1:
         raise SystemExit("Could not insert the KernelSU read hook into SYSCALL_DEFINE3(read)")
 if s.count("ksu_handle_sys_read(fd, &buf, &count);") != 1:
