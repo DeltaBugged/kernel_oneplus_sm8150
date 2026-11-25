@@ -60,8 +60,23 @@ jobs:
           # This kernel has a customized cmdline implementation for boot flags.
           # Apply the upstream 4.14 backport everywhere except cmdline.c, then
           # integrate SUSFS spoofing into the existing proc_command_line buffer.
-          patch --dry-run --batch --forward --exclude=fs/proc/cmdline.c -p1 < /tmp/susfs-4.14-v2.3.0.patch
-          patch --batch --forward --exclude=fs/proc/cmdline.c -p1 < /tmp/susfs-4.14-v2.3.0.patch
+          # GNU patch on Ubuntu does not support --exclude; filter this file
+          # section from the unified diff and handle cmdline.c below.
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path("/tmp/susfs-4.14-v2.3.0.patch").read_text()
+          sections = src.split("diff --git ")
+          kept = [sections[0]]
+          for section in sections[1:]:
+              header = section.splitlines()[0]
+              if header != "a/fs/proc/cmdline.c b/fs/proc/cmdline.c":
+                  kept.append("diff --git " + section)
+          Path("/tmp/susfs-4.14-filtered.patch").write_text("".join(kept))
+          if "fs/proc/cmdline.c" in Path("/tmp/susfs-4.14-filtered.patch").read_text():
+              raise SystemExit("cmdline.c section was not excluded")
+          PY
+          patch --dry-run --batch --forward -p1 < /tmp/susfs-4.14-filtered.patch
+          patch --batch --forward -p1 < /tmp/susfs-4.14-filtered.patch
           python3 - <<'PY'
           from pathlib import Path
           p = Path("fs/proc/cmdline.c")
