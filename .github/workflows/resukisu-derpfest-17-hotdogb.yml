@@ -374,6 +374,29 @@ jobs:
               raise SystemExit("Custom cmdline function did not match")
           p.write_text(s.replace(old, new, 1))
           PY
+          # fs/stat.c's upstream KSTAT hunk uses SUSFS helper/macros.
+          # On this 4.14 tree those are provided by susfs_def.h, not linux/stat.h.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("fs/stat.c")
+          s = p.read_text()
+          inc = """#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+          #include <linux/susfs_def.h>
+          #endif
+          """
+          if "include <linux/susfs_def.h>" not in s:
+              anchor = "#include <asm/unistd.h>\n"
+              if s.count(anchor) != 1:
+                  raise SystemExit("Could not find unique fs/stat.c include insertion point")
+              s = s.replace(anchor, anchor + "\n" + inc, 1)
+          for token in ("susfs_is_current_app_uid", "STATX_SUS_KSTAT", "STATX_SUS_KSTAT_FUSE"):
+              if token not in s:
+                  raise SystemExit(f"fs/stat.c missing expected KSTAT token: {token}")
+          if "include <linux/susfs_def.h>" not in s:
+              raise SystemExit("SUSFS KSTAT definitions header was not included")
+          p.write_text(s)
+          print("fs/stat.c now imports SUSFS KSTAT flags and current-app UID helper.")
+          PY
           test -s fs/susfs.c
           test -s include/linux/susfs.h
           test -s include/linux/susfs_def.h
