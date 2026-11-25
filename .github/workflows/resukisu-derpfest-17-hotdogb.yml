@@ -51,6 +51,19 @@ jobs:
           echo "ReSukiSU pinned commit: ${RESUKISU_COMMIT}"
           echo "ReSukiSU pinned commit: ${RESUKISU_COMMIT}" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Apply SUSFS v2.3.0 Linux 4.14 backport
+        run: |
+          set -euo pipefail
+          SUSFS_PATCH_URL="https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/Patch/susfs_patch_to_4.14.patch"
+          curl -fLSs "${SUSFS_PATCH_URL}" -o /tmp/susfs-4.14-v2.3.0.patch
+          grep -q 'SUSFS' /tmp/susfs-4.14-v2.3.0.patch
+          patch --dry-run --batch --forward -p1 < /tmp/susfs-4.14-v2.3.0.patch
+          patch --batch --forward -p1 < /tmp/susfs-4.14-v2.3.0.patch
+          test -s fs/susfs.c
+          test -s include/linux/susfs.h
+          test -s include/linux/susfs_def.h
+          echo "SUSFS v2.3.0 Linux 4.14 patch applied cleanly."
+
       - name: Add and verify Linux 4.14 manual hooks
         run: |
           set -euo pipefail
@@ -328,7 +341,7 @@ jobs:
           echo "=== OPLUS/TOUCHPANEL entries in oplus.config ==="
           grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' arch/arm64/configs/vendor/oplus.config || true
           scripts/kconfig/merge_config.sh -m -O out out/.config arch/arm64/configs/vendor/oplus.config
-          scripts/config --file out/.config -e KSU -e KSU_MANUAL_HOOK -e KSU_MANUAL_HOOK_AUTO_SETUID_HOOK -e KSU_MANUAL_HOOK_AUTO_INITRC_HOOK -e KSU_MANUAL_HOOK_AUTO_INPUT_HOOK -e KALLSYMS -e KALLSYMS_ALL -d KSU_TRACEPOINT_HOOK -d KSU_SUSFS
+          scripts/config --file out/.config -e KSU -e KSU_MANUAL_HOOK -e KSU_MANUAL_HOOK_AUTO_SETUID_HOOK -e KSU_MANUAL_HOOK_AUTO_INITRC_HOOK -e KSU_MANUAL_HOOK_AUTO_INPUT_HOOK -e KALLSYMS -e KALLSYMS_ALL -e KSU_SUSFS -e KSU_SUSFS_SUS_PATH -e KSU_SUSFS_SUS_MOUNT -e KSU_SUSFS_SUS_KSTAT -e KSU_SUSFS_SPOOF_UNAME -e KSU_SUSFS_ENABLE_LOG -e KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS -e KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG -e KSU_SUSFS_OPEN_REDIRECT -e KSU_SUSFS_SUS_MAP -d KSU_TRACEPOINT_HOOK -d LOCALVERSION_AUTO --set-str LOCALVERSION -Delta-perf
           make ARCH=arm64 O=out olddefconfig
           echo "=== Effective OPLUS/TOUCHPANEL settings after olddefconfig ==="
           grep -E '^(CONFIG_OPLUS_|CONFIG_TOUCHPANEL_)' out/.config || true
@@ -339,10 +352,13 @@ jobs:
           grep -Fqx 'CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y' out/.config || { echo "ERROR: automatic init.rc hook is not enabled"; exit 1; }
           grep -Fqx 'CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y' out/.config || { echo "ERROR: automatic input hook is not enabled"; exit 1; }
           grep -Fqx '# CONFIG_KSU_TRACEPOINT_HOOK is not set' out/.config || { echo "ERROR: tracepoint hook must be disabled on Linux 4.14"; exit 1; }
-          grep -Fqx '# CONFIG_KSU_SUSFS is not set' out/.config || { echo "ERROR: SUSFS must remain disabled for this build"; exit 1; }
+          grep -Fqx 'CONFIG_KSU_SUSFS=y' out/.config || { echo "ERROR: SUSFS is not enabled"; exit 1; }
+          grep -Fqx 'CONFIG_KSU_SUSFS_SUS_PATH=y' out/.config || { echo "ERROR: SUSFS path support is not enabled"; exit 1; }
+          grep -Fqx '# CONFIG_LOCALVERSION_AUTO is not set' out/.config || { echo "ERROR: automatic Git version suffix is enabled"; exit 1; }
+          grep -Fqx 'CONFIG_LOCALVERSION="-Delta-perf"' out/.config || { echo "ERROR: expected clean Delta kernel version"; exit 1; }
           grep -Fqx 'CONFIG_KALLSYMS=y' out/.config || { echo "ERROR: KALLSYMS did not resolve to y"; exit 1; }
           grep -Fqx 'CONFIG_KALLSYMS_ALL=y' out/.config || { echo "ERROR: KALLSYMS_ALL did not resolve to y"; exit 1; }
-          grep -E '^(CONFIG_KSU=|CONFIG_KSU_MANUAL_HOOK=|CONFIG_KSU_MANUAL_HOOK_AUTO_|# CONFIG_KSU_TRACEPOINT_HOOK is not set|# CONFIG_KSU_SUSFS is not set|CONFIG_KALLSYMS=|CONFIG_KALLSYMS_ALL=)' out/.config
+          grep -E '^(CONFIG_KSU=|CONFIG_KSU_MANUAL_HOOK=|CONFIG_KSU_MANUAL_HOOK_AUTO_|# CONFIG_KSU_TRACEPOINT_HOOK is not set|CONFIG_KSU_SUSFS=|CONFIG_KALLSYMS=|CONFIG_KALLSYMS_ALL=)' out/.config
 
       - name: Enable built-in Qualcomm WLAN driver
         run: |
@@ -364,6 +380,7 @@ jobs:
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             DTC=/usr/bin/dtc \
+            LOCALVERSION= \
             Image.gz-dtb
 
       - name: Verify linked ReSukiSU and Qualcomm WLAN
