@@ -221,19 +221,19 @@ def add_return_hook(source, syscall, hook):
     start = source.find(syscall)
     if start < 0:
         raise SystemExit(f"Could not find {syscall}")
-    end = source.find("\\n}", start)
+    end = source.find("\n}", start)
     if end < 0:
         raise SystemExit(f"Could not find end of {syscall}")
     block = source[start:end]
     if hook in block:
         return source
-    needle = "\\treturn error;"
+    needle = "\treturn error;"
     if block.count(needle) != 1:
         raise SystemExit(f"Could not find unique return in {syscall}")
     insertion = f"""#ifdef CONFIG_KSU
-\\t{hook}
+\t{hook}
 #endif
-\\treturn error;"""
+\treturn error;"""
     block = block.replace(needle, insertion, 1)
     return source[:start] + block + source[end:]
 
