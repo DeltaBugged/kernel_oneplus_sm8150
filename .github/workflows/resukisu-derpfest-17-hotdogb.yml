@@ -444,6 +444,15 @@ jobs:
           grep -E '^(CONFIG_(STAGING|QCA_CLD_WLAN))=' out/.config || true
           grep -Fqx "CONFIG_QCA_CLD_WLAN=y" out/.config || { echo "ERROR: QCA_CLD_WLAN did not resolve to y"; exit 1; }
 
+      - name: Set deterministic clean kernel version
+        run: |
+          set -euo pipefail
+          # scripts/setlocalversion trusts .scmversion when present and skips
+          # git status, preventing workflow-applied source patches from adding -dirty.
+          printf '%s' "-g${GITHUB_SHA:0:12}" > .scmversion
+          echo "Kernel SCM suffix: $(cat .scmversion)"
+          test "$(cat .scmversion)" = "-g${GITHUB_SHA:0:12}"
+
       - name: Compile Image.gz-dtb
         run: |
           set -euo pipefail
